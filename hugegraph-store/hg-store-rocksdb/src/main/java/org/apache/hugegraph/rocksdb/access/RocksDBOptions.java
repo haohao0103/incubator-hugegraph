@@ -114,9 +114,16 @@ public class RocksDBOptions extends OptionHolder {
             new ConfigConvOption<>(
                     "rocksdb.compaction_style",
                     "Set compaction style for RocksDB: LEVEL/UNIVERSAL/FIFO.",
-                    allowValues("LEVEL", "UNIVERSAL", "FIFO"),
+                    allowValues("LEVEL", "UNIVERSAL", "FIFO","NONE"),
                     CompactionStyle::valueOf,
                     "LEVEL"
+            );
+    public static final ConfigOption<Boolean> DISABLE_AUTO_COMPACTION =
+            new ConfigOption<>(
+                    "rocksdb.disable_auto_compaction",
+                    "Set disable auto compaction.",
+                    disallowEmpty(),
+                    false
             );
     public static final ConfigOption<Boolean> OPTIMIZE_MODE =
             new ConfigOption<>(
