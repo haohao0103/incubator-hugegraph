@@ -248,33 +248,46 @@ public class TaskScheduleService {
             return null;
         }
 
+        // 遍历所有的分片组
         // 副本数不一致，重新分配副本
         for (Metapb.ShardGroup group : storeService.getShardGroups()) {
+            // 如果分片组的分片数量与配置中的分片数量不一致
             if (group.getShardsCount() != pdConfig.getPartition().getShardCount()) {
+                // 重新分配分片
                 storeService.reallocShards(group);
+                // 避免后面的 balance partition shard 马上执行，设置键值对 "BALANCE_SHARD_KEY" 的值为 "DOING"，过期时间为180秒
                 // 避免后面的 balance partition shard 马上执行.
                 kvService.put(BALANCE_SHARD_KEY, "DOING", 180 * 1000);
             }
         }
+
+        // 获取已下线的存储节点
         //检查shard是否在线。
         Map<Long, Metapb.Store> tombStores = storeService.getTombStores().stream().collect(
                 Collectors.toMap(Metapb.Store::getId, t -> t));
 
         var partIds = new HashSet<Integer>();
 
+        // 遍历已下线的存储节点
         for (var pair : tombStores.entrySet()) {
+            // 获取存储节点上的分区
             for (var partition : partitionService.getPartitionByStore(pair.getValue())) {
+                // 如果分区已存在于 partIds 中，则跳过
                 if (partIds.contains(partition.getId())) {
                     continue;
                 }
+                // 将分区ID添加到 partIds 中
                 partIds.add(partition.getId());
 
+                // 关闭存储节点
                 storeService.storeTurnoff(pair.getValue());
+                // 将分区从存储节点下线
                 partitionService.shardOffline(partition, pair.getValue().getId());
             }
 
         }
 
+        // 返回空列表
         return null;
     }
 
