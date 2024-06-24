@@ -47,7 +47,7 @@ public class PDConfig {
     private long patrolInterval = 300;  //巡查任务时间间隔
     @Value("${pd.data-path}")
     private String dataPath;
-    @Value("${pd.initial-store-count:3}")
+    @Value("${pd.min-store-count:3}")
     private int minStoreCount;
 
     // 初始store列表，该列表内的store自动激活
