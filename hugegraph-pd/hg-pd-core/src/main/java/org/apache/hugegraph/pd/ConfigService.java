@@ -79,8 +79,12 @@ public class ConfigService implements RaftStateListener {
      */
     public PDConfig loadConfig() {
         try {
+            // 从meta中获取PDConfig对象
             Metapb.PDConfig mConfig = this.meta.getPdConfig(0);
+
+            // 如果获取到的mConfig为空
             if (mConfig == null) {
+                // 创建一个新的Metapb.PDConfig对象并设置初始值
                 mConfig = Metapb.PDConfig.newBuilder()
                                          .setPartitionCount(pdConfig.getInitialPartitionCount())
                                          .setShardCount(pdConfig.getPartition().getShardCount())
@@ -90,13 +94,34 @@ public class ConfigService implements RaftStateListener {
                                                  pdConfig.getPartition().getMaxShardsPerStore())
                                          .build();
             }
+
+            // 如果配置文件中的ShardCount和meta中不一致，配置文件中的大于Meta中，则选取配置文件中的值
+            // 这种情形只会发生在重启集群的时候，如果运行过程中发生了leader切换，则不会出现这种情况
+            if ( mConfig !=null && pdConfig.getPartition().getShardCount() != mConfig.getShardCount()) {
+                // 创建一个新的Metapb.PDConfig对象并设置初始值
+                Metapb.PDConfig nmConfig = Metapb.PDConfig.newBuilder()
+                        .setPartitionCount(pdConfig.getInitialPartitionCount())
+                        .setShardCount(pdConfig.getPartition().getShardCount())
+                        .setVersion(1)
+                        .setTimestamp(System.currentTimeMillis())
+                        .setMaxShardsPerStore(mConfig.getMaxShardsPerStore())
+                        .build();
+                mConfig=nmConfig;
+            }
+            // 如果是RaftEngine的leader节点
             if (RaftEngine.getInstance().isLeader()) {
+                // 将mConfig保存到meta中
                 this.meta.setPdConfig(mConfig);
             }
+
+            // 更新全局的pdConfig对象
             pdConfig = updatePDConfig(mConfig);
         } catch (Exception e) {
+            // 如果出现异常，记录错误日志
             log.error("ConfigService loadConfig exception {}", e);
         }
+
+        // 返回更新后的pdConfig对象
         return pdConfig;
     }
 

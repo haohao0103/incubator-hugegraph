@@ -48,8 +48,8 @@ pd:
   data-path: ./pd_data
   # 自动扩容的检查周期，定时检查每个 store 的分区数量，自动进行分区数量平衡
   patrol-interval: 1800
-  # 初始 store 列表，在列表内的 store 自动激活
-  initial-store-count: 1
+  # 可以接受最少存活的store节点数量，少于该数值整个集群不可用
+  min-store-count: 1
   # grpc IP:grpc port
   initial-store-list: 127.0.0.1:8500
 

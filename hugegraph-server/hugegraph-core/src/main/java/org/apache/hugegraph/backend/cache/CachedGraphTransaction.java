@@ -392,10 +392,13 @@ public final class CachedGraphTransaction extends GraphTransaction {
                     vertexIds[vertexOffset++] = vertex.id();
                     this.verticesCache.invalidate(vertex.id());
                 }
-                if (vertexOffset > 0) {
-                    this.notifyChanges(Cache.ACTION_INVALIDED,
-                                       HugeType.VERTEX, vertexIds);
-                }
+
+                //TODO Temporary to resolve the memory leak issue; future optimization is needed ,
+                // it essentially pertains to the consistency  of caches across multi graph server nodes.
+//                if (vertexOffset > 0) {
+//                    this.notifyChanges(Cache.ACTION_INVALIDED,
+//                                       HugeType.VERTEX, vertexIds);
+//                }
             }
 
             /*

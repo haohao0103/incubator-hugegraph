@@ -126,6 +126,15 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
         return true;
     }
 
+    /**
+     *`DBOptions`和`ColumnFamilyOptions`是两种配置选项，它们分别用于控制数据库级别和列族级别的行为和性能。
+     * `MutableDBOptions`和`MutableColumnFamilyOptions`是它们的可变对应版本，允许在运行时动态更改某些选项
+     * @param conf
+     * @param db
+     * @param mdb
+     * @param cf
+     * @param mcf
+     */
     public static void initOptions(HugeConfig conf,
                                    DBOptionsInterface<?> db,
                                    MutableDBOptionsInterface<?> mdb,
@@ -259,6 +268,9 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
                     conf.get(RocksDBOptions.SOFT_PENDING_COMPACTION_LIMIT));
             mcf.setHardPendingCompactionBytesLimit(
                     conf.get(RocksDBOptions.HARD_PENDING_COMPACTION_LIMIT));
+            if(conf.get(RocksDBOptions.DISABLE_AUTO_COMPACTION)){
+                mcf.setDisableAutoCompactions(true);
+            }
 
             // conf.get(RocksDBOptions.BULKLOAD_MODE);
         }
@@ -404,53 +416,80 @@ public class RocksDBSession implements AutoCloseable, Cloneable {
         return this.tables.containsKey(table);
     }
 
-    private void openRocksDB(String dbDataPath, long version) {
-
+private void openRocksDB(String dbDataPath, long version) {
+        // 如果数据路径以文件分隔符结尾，则在路径后直接加上图名称
         if (dbDataPath.endsWith(File.separator)) {
             this.dbPath = dbDataPath + this.graphName;
         } else {
+            // 否则，在路径后加上文件分隔符和图名称
             this.dbPath = dbDataPath + File.separator + this.graphName;
         }
 
+        // 查找并更新数据库路径为最新路径
         this.dbPath = findLatestDBPath(dbPath, version);
 
+        // 断言：数据库路径不为空
         Asserts.isTrue((dbPath != null),
                        () -> new DBStoreException("the data-path of RocksDB is null"));
 
+        // 创建RocksDB的目录
         //makedir for rocksdb
         createDirectory(dbPath);
 
+        // 创建RocksDB的选项
         Options opts = new Options();
+
         RocksDBSession.initOptions(hugeConfig, opts, opts, opts, opts);
         dbOptions = new DBOptions(opts);
         dbOptions.setStatistics(rocksDbStats);
 
         try {
+            // 存储所有列族描述符的列表
             List<ColumnFamilyDescriptor> columnFamilyDescriptorList =
                     new ArrayList<>();
+            // 获取所有列族的字节码列表
             List<byte[]> columnFamilyBytes = RocksDB.listColumnFamilies(new Options(), dbPath);
 
+            // 创建列族选项
             ColumnFamilyOptions cfOptions = new ColumnFamilyOptions();
+
+            // 根据配置文件选项设置是否关闭自动压缩
+            // 基于配置文件选项设置是否关闭自动压缩
+            // ColumnFamilyOptions 有区分开可变和不可变，现有认知中是
+            // 有些参数是可以动态修改的，有些不可以，动态修改的意思是重启进程后可以使用新的属性
+            if(this.hugeConfig.get(RocksDBOptions.DISABLE_AUTO_COMPACTION)){
+                cfOptions.setDisableAutoCompactions(true);
+            }
             RocksDBSession.initOptions(this.hugeConfig, null, null, cfOptions, cfOptions);
 
+            // 如果存在列族，则遍历并添加到列族描述符列表中
             if (columnFamilyBytes.size() > 0) {
                 for (byte[] columnFamilyByte : columnFamilyBytes) {
                     columnFamilyDescriptorList.add(
                             new ColumnFamilyDescriptor(columnFamilyByte, cfOptions));
                 }
             } else {
+                // 如果不存在列族，则添加默认列族到列族描述符列表中
                 columnFamilyDescriptorList.add(
                         new ColumnFamilyDescriptor(RocksDB.DEFAULT_COLUMN_FAMILY, cfOptions));
             }
+
+            // 存储所有列族句柄的列表
             List<ColumnFamilyHandle> columnFamilyHandleList = new ArrayList<>();
+
+            // 打开RocksDB数据库，并获取所有列族句柄
             this.rocksDB = RocksDB.open(dbOptions, dbPath, columnFamilyDescriptorList,
                                         columnFamilyHandleList);
+
+            // 断言：必须存在列族
             Asserts.isTrue(columnFamilyHandleList.size() > 0, "must have column family");
 
+            // 将列族句柄和对应的列族名称存入哈希表
             for (ColumnFamilyHandle handle : columnFamilyHandleList) {
                 this.tables.put(new String(handle.getDescriptor().getName()), handle);
             }
         } catch (RocksDBException e) {
+            // 如果发生RocksDB异常，则抛出DBStoreException异常
             throw new DBStoreException(e);
         }
     }
