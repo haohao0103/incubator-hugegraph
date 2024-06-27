@@ -63,16 +63,24 @@ public class DefaultPdProvider implements PdProvider {
     private PDPulse.Notifier<PartitionHeartbeatRequest.Builder> pdPulse;
     private GraphManager graphManager = null;
     PDClient.PDEventListener listener = new PDClient.PDEventListener() {
-        // 监听pd变更信息的listener
+        // 监听pd、store变更信息的listener
         @Override
         public void onStoreChanged(NodeEvent event) {
+            // 如果事件类型是节点raft变更
             if (event.getEventType() == NodeEvent.EventType.NODE_RAFT_CHANGE) {
+                // 打印日志，表示store raft group已变更
                 log.info("store raft group changed!, {}", event);
+                // 清除pd客户端的store缓存
                 pdClient.invalidStoreCache(event.getNodeId());
+                // 重建raft组
                 HgStoreEngine.getInstance().rebuildRaftGroup(event.getNodeId());
+            // 如果事件类型是pd leader变更
             } else if (event.getEventType() == NodeEvent.EventType.NODE_PD_LEADER_CHANGE) {
+                // 打印日志，表示pd leader已变更，并重启心跳
                 log.info("pd leader changed!, {}. restart heart beat", event);
+                // 重置pulseClient的stub
                 if (pulseClient.resetStub(event.getGraph(), pdPulse)) {
+                    // 启动心跳流
                     startHeartbeatStream(hbOnError);
                 }
             }
@@ -99,6 +107,7 @@ public class DefaultPdProvider implements PdProvider {
         this.pdClient.addEventListener(listener);
         this.pdServerAddress = pdAddress;
         partitionCommandListeners = Collections.synchronizedList(new ArrayList());
+        // pdClient.getLeaderIp() 就是与pd leader 通信的grpc 客户端
         log.info("pulse client connect to {}", pdClient.getLeaderIp());
         this.pulseClient = new PDPulseImpl(pdClient.getLeaderIp());
     }
@@ -204,13 +213,25 @@ public class DefaultPdProvider implements PdProvider {
         }
     }
 
+    /**
+     * 根据给定的storeId获取对应的分区列表
+     *
+     * @param storeId 存储ID
+     * @return 分区列表
+     * @throws PDException 抛出PDException异常
+     */
     @Override
     public List<Partition> getPartitionsByStore(long storeId) throws PDException {
+        // 创建一个空的分区列表
         List<Partition> partitions = new ArrayList<>();
+        // 通过pdClient获取指定storeId对应的分区列表
         List<Metapb.Partition> parts = pdClient.getPartitionsByStore(storeId);
+        // 遍历每个分区
         parts.forEach(e -> {
+            // 将每个分区转化为Partition对象，并添加到partitions列表中
             partitions.add(new Partition(e));
         });
+        // 返回最终的分区列表
         return partitions;
     }
 
@@ -261,23 +282,28 @@ public class DefaultPdProvider implements PdProvider {
                 // 消息消费应答，能够正确消费消息，调用accept返回状态码，否则不要调用accept
                 Consumer<Integer> consumer = integer -> {
                     LOG.debug("Partition heartbeat accept instruction: {}", content);
-                    // LOG.info("accept notice id : {}, ts:{}", response.getNoticeId(), System
-                    // .currentTimeMillis());
                     // http2 并发问题，需要加锁
-                    // synchronized (pdPulse) {
-                    response.ack();
-                    // }
+                    // 同步代码块开始
+                    synchronized (pdPulse) {
+                        // LOG.info("accept notice id : {}, ts:{}", response.getNoticeId(), System
+                        // .currentTimeMillis());
+                        response.ack();
+                    }
+                    // 同步代码块结束
                 };
 
+                // 判断是否包含指令响应
                 if (content.hasInstructionResponse()) {
                     var pdInstruction = content.getInstructionResponse();
                     consumer.accept(0);
+                    // 判断指令类型是否为改变为follower
                     // 当前的链接变成了follower，重新链接
                     if (pdInstruction.getInstructionType() ==
                         PdInstructionType.CHANGE_TO_FOLLOWER) {
                         onCompleted();
                         log.info("got pulse instruction, change leader to {}",
                                  pdInstruction.getLeaderIp());
+                        // 重置连接，并重新启动心跳流式传输
                         if (pulseClient.resetStub(pdInstruction.getLeaderIp(), pdPulse)) {
                             startHeartbeatStream(hbOnError);
                         }
@@ -285,41 +311,51 @@ public class DefaultPdProvider implements PdProvider {
                     return;
                 }
 
+                // 获取心跳响应中的分区心跳指令
                 PartitionHeartbeatResponse instruct = content.getPartitionHeartbeatResponse();
                 LOG.debug("Partition heartbeat receive instruction: {}", instruct);
 
+                // 根据心跳指令创建分区对象
                 Partition partition = new Partition(instruct.getPartition());
 
+                // 遍历分区指令监听器列表
                 for (PartitionInstructionListener event : partitionCommandListeners) {
+                    // 判断是否包含变更分片指令
                     if (instruct.hasChangeShard()) {
                         event.onChangeShard(instruct.getId(), partition, instruct
                                                     .getChangeShard(),
                                             consumer);
                     }
+                    // 判断是否包含拆分分区指令
                     if (instruct.hasSplitPartition()) {
                         event.onSplitPartition(instruct.getId(), partition,
                                                instruct.getSplitPartition(), consumer);
                     }
+                    // 判断是否包含转移leader指令
                     if (instruct.hasTransferLeader()) {
                         event.onTransferLeader(instruct.getId(), partition,
                                                instruct.getTransferLeader(), consumer);
                     }
+                    // 判断是否包含数据库压缩指令
                     if (instruct.hasDbCompaction()) {
                         event.onDbCompaction(instruct.getId(), partition,
                                              instruct.getDbCompaction(), consumer);
                     }
 
+                    // 判断是否包含移动分区指令
                     if (instruct.hasMovePartition()) {
                         event.onMovePartition(instruct.getId(), partition,
                                               instruct.getMovePartition(), consumer);
                     }
 
+                    // 判断是否包含清理分区指令
                     if (instruct.hasCleanPartition()) {
                         event.onCleanPartition(instruct.getId(), partition,
                                                instruct.getCleanPartition(),
                                                consumer);
                     }
 
+                    // 判断是否包含分区键范围变更指令
                     if (instruct.hasKeyRange()) {
                         event.onPartitionKeyRangeChanged(instruct.getId(), partition,
                                                          instruct.getKeyRange(),
@@ -331,6 +367,7 @@ public class DefaultPdProvider implements PdProvider {
             @Override
             public void onError(Throwable throwable) {
                 LOG.error("Partition heartbeat stream error. {}", throwable);
+                // 重置连接，并调用错误回调函数
                 pulseClient.resetStub(pdClient.getLeaderIp(), pdPulse);
                 onError.accept(throwable);
             }

@@ -173,7 +173,7 @@ public class PDService extends PDGrpc.PDImplBase implements ServiceGrpc, RaftSta
         RaftEngine.getInstance().addStateListener(partitionService);
         pdConfig.setIdService(idService);
 
-        // 接收心跳消息
+        // 接收脉搏消息，这个脉搏信息是来自哪里呢？
         PDPulseSubject.listenPartitionHeartbeat(new PulseListener<PartitionHeartbeatRequest>() {
             @Override
             public void onNext(PartitionHeartbeatRequest request) throws Exception {

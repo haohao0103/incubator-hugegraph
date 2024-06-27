@@ -244,19 +244,25 @@ public class HgStoreEngine implements Lifecycle<HgStoreEngineOptions>, HgStoreSt
     public void rebuildRaftGroup(long storeId) {
         partitionEngines.forEach((partId, engine) -> {
             try {
+                // 根据storeId获取对应的分区列表
                 var partitions = pdProvider.getPartitionsByStore(storeId);
                 if (partitions.size() > 0) {
+                    // 获取指定分区的分片组中的分片列表
                     var shards = pdProvider.getShardGroup(partId).getShardsList();
                     if (shards.stream().anyMatch(s -> s.getStoreId() == storeId)) {
+                        // 将分片转换为节点raftaddress列表
                         var peers = partitionManager.shards2Peers(shards);
                         Configuration initConf = engine.getOptions().getConf();
                         if (initConf == null) {
+                            // 设置节点的peer列表
                             engine.getOptions().setPeerList(peers);
                         } else {
+                            // 将节点添加到配置中的peers列表中
                             peers.stream()
                                  .forEach(peer -> initConf.addPeer(JRaftUtils.getPeerId(peer)));
                         }
 
+                        // 重启raft节点
                         // engine.getOptions().getConf().setPeers();
                         engine.restartRaftNode();
                     }

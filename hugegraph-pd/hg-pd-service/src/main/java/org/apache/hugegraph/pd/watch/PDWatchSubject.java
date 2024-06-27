@@ -109,13 +109,18 @@ public class PDWatchSubject implements StreamObserver<WatchRequest> {
 
     private static Long createWatcherId() {
         synchronized (lock) {
+            // 线程让步，给其他线程执行的机会
             Thread.yield();
+
             try {
+                // 线程休眠1毫秒
                 Thread.sleep(1);
             } catch (InterruptedException e) {
+                // 捕获中断异常，并打印错误日志
                 log.error("Failed to sleep", e);
             }
 
+            // 返回当前系统时间的毫秒数作为watcher的id
             return System.currentTimeMillis();
         }
 

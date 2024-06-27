@@ -199,13 +199,21 @@ public class TaskScheduleService {
         }
 
         List<Metapb.Store> changedStores = new ArrayList<>();
+
+        // 获取所有store列表
         // 检查store在线状态
         List<Metapb.Store> stores = storeService.getStores("");
+
+        // 获取所有活跃的store的ID和Store对象映射关系
         Map<Long, Metapb.Store> activeStores = storeService.getActiveStores("")
                                                            .stream().collect(
-                        Collectors.toMap(Metapb.Store::getId, t -> t));
+                Collectors.toMap(Metapb.Store::getId, t -> t));
+
+        // 遍历所有store
         for (Metapb.Store store : stores) {
             Metapb.Store changeStore = null;
+
+            // 判断store是否在线（状态为Up或Unknown）且不在活跃store列表中
             if ((store.getState() == Metapb.StoreState.Up
                  || store.getState() == Metapb.StoreState.Unknown)
                 && !activeStores.containsKey(store.getId())) {
@@ -214,6 +222,8 @@ public class TaskScheduleService {
                                           .setState(Metapb.StoreState.Offline)
                                           .build();
 
+            // 判断store状态为Exiting且不在活跃store列表中，
+            // 或者store状态为Offline且离线时间超过最大允许时间，并且集群启动时间也超过最大允许时间
             } else if ((store.getState() == Metapb.StoreState.Exiting &&
                         !activeStores.containsKey(store.getId())) ||
                        (store.getState() == Metapb.StoreState.Offline &&
@@ -221,7 +231,7 @@ public class TaskScheduleService {
                          pdConfig.getStore().getMaxDownTime() * 1000) &&
                         (System.currentTimeMillis() - clusterStartTime >
                          pdConfig.getStore().getMaxDownTime() * 1000))) {
-                //手工修改为下线或者离线达到时长
+                // 手工修改为下线或者离线达到时长
                 // 修改状态为关机, 增加 checkStoreCanOffline 检测
                 if (storeService.checkStoreCanOffline(store)) {
                     changeStore = Metapb.Store.newBuilder(store)
@@ -231,11 +241,15 @@ public class TaskScheduleService {
                     log.info("patrolStores store {} Offline", changeStore.getId());
                 }
             }
+
+            // 如果store状态发生了变化，则更新store并添加到changedStores列表中
             if (changeStore != null) {
                 storeService.updateStore(changeStore);
                 changedStores.add(changeStore);
             }
         }
+
+        // 返回状态发生变化的store列表
         return changedStores;
     }
 

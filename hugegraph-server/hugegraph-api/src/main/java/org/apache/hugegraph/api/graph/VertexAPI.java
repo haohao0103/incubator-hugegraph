@@ -322,17 +322,29 @@ public class VertexAPI extends BatchAPI {
     }
 
     public static Id checkAndParseVertexId(String idValue) {
+        // 如果idValue为空，则返回null
         if (idValue == null) {
             return null;
         }
+
+        // 判断idValue是否以"U"开头
         boolean uuid = idValue.startsWith("U\"");
+
+        // 如果idValue以"U"开头，则去掉开头的"U"
         if (uuid) {
             idValue = idValue.substring(1);
         }
+
         try {
+            // 将idValue解析为Object类型的对象
             Object id = JsonUtil.fromJson(idValue, Object.class);
+
+            // 根据uuid的值返回对应的Id类型
+            // 如果uuid为true，则返回Text类型的UUID
+            // 如果uuid为false，则返回HugeVertex的id值
             return uuid ? Text.uuid((String) id) : HugeVertex.getIdValue(id);
         } catch (Exception e) {
+            // 如果解析过程中出现异常，则抛出IllegalArgumentException异常
             throw new IllegalArgumentException(String.format(
                     "The vertex id must be formatted as Number/String/UUID" +
                     ", but got '%s'", idValue));

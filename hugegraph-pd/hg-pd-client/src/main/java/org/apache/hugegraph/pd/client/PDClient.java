@@ -114,8 +114,8 @@ public class PDClient {
         partitionWatcher = pdWatch.watchPartition(new PDWatch.Listener<>() {
             @Override
             public void onNext(PartitionEvent response) {
-                // log.info("PDClient receive partition event {}-{} {}",
-                //        response.getGraph(), response.getPartitionId(), response.getChangeType());
+                 log.info("PDClient receive partition event {}-{} {}",
+                        response.getGraph(), response.getPartitionId(), response.getChangeType());
                 invalidPartitionCache(response.getGraph(), response.getPartitionId());
 
                 if (response.getChangeType() == PartitionEvent.ChangeType.DEL) {
@@ -472,8 +472,9 @@ public class PDClient {
     public KVPair<Metapb.Partition, Metapb.Shard> getPartition(String graphName, byte[] key,
                                                                int code) throws
                                                                          PDException {
-        KVPair<Metapb.Partition, Metapb.Shard> partShard =
-                cache.getPartitionByCode(graphName, code);
+//        KVPair<Metapb.Partition, Metapb.Shard> partShard =
+//                cache.getPartitionByCode(graphName, code);
+        KVPair<Metapb.Partition, Metapb.Shard> partShard = this.getPartitionByCode(graphName, code);
         partShard = getKvPair(graphName, key, partShard);
         return partShard;
     }

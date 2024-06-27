@@ -72,21 +72,37 @@ public class HeartbeatService implements Lifecycle<HgStoreEngineOptions>, Partit
 
     @Override
     public boolean init(HgStoreEngineOptions opts) {
+        // 设置选项
         this.options = opts;
+
+        // 获取存储信息
         storeInfo = storeMetadata.getStore();
         if (storeInfo == null) {
+            // 如果存储信息为空，则创建一个新的存储对象
             storeInfo = new Store();
         }
+
+        // 设置存储地址
         storeInfo.setStoreAddress(options.getGrpcAddress());
+        // 设置PD地址
         storeInfo.setPdAddress(options.getPdAddress());
+        // 设置Raft地址
         storeInfo.setRaftAddress(options.getRaftAddress());
+        // 设置存储状态为未知
         storeInfo.setState(Metapb.StoreState.Unknown);
+        // 设置标签
         storeInfo.setLabels(options.getLabels());
+        // 设置核心数
         storeInfo.setCores(Runtime.getRuntime().availableProcessors());
+        // 设置部署路径
         storeInfo.setDeployPath(HeartbeatService.class.getResource("/").getPath());
+        // 设置数据路径
         storeInfo.setDataPath(options.getDataPath());
+
+        // 设置PD提供者
         this.pdProvider = options.getPdProvider();
 
+        // 启动一个线程用于发送存储心跳
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -94,12 +110,15 @@ public class HeartbeatService implements Lifecycle<HgStoreEngineOptions>, Partit
             }
         }, "heartbeat").start();
 
+        // 启动一个线程用于发送分区心跳
         new Thread(new Runnable() {
             @Override
             public void run() {
                 doPartitionHeartbeat();
             }
         }, " partition-hb").start();
+
+        // 返回初始化成功
         return true;
     }
 
@@ -171,52 +190,74 @@ public class HeartbeatService implements Lifecycle<HgStoreEngineOptions>, Partit
 
     protected void registerStore() {
         try {
+            // 设置存储地址
             // 注册 store，初次注册 PD 产生 id，自动给 storeinfo 赋值
             this.storeInfo.setStoreAddress(IpUtil.getNearestAddress(options.getGrpcAddress()));
+            // 设置 Raft 地址
             this.storeInfo.setRaftAddress(IpUtil.getNearestAddress(options.getRaftAddress()));
 
+            // 注册 store 并获取 storeId
             long storeId = pdProvider.registerStore(this.storeInfo);
             if (storeId != 0) {
+                // 如果 storeId 不为 0，说明注册成功
                 storeInfo.setId(storeId);
                 storeMetadata.save(storeInfo);
+                // 获取集群状态
                 this.clusterStats = pdProvider.getClusterStats();
                 if (clusterStats.getState() == Metapb.ClusterState.Cluster_OK) {
+                    // 如果集群状态正常，则设置下一次心跳间隔为配置中的值
                     timerNextDelay = options.getStoreHBInterval() * 1000;
                 } else {
+                    // 如果集群状态异常，则设置下一次心跳间隔为注册重试间隔
                     timerNextDelay = REGISTER_RETRY_INTERVAL * 1000;
                 }
+                // 打印日志，表示注册成功
                 log.info("Register Store id= {} successfully. store = {}, clusterStats {}",
                          storeInfo.getId(), storeInfo, this.clusterStats);
-                // 监听 partition 消息
+
+
+                // 开始监听心跳流，并在连接关闭时执行相应操作
                 pdProvider.startHeartbeatStream(error -> {
+                    // 如果状态改变为离线，则更新下一次心跳间隔并唤醒心跳线程
                     onStateChanged(Metapb.StoreState.Offline);
                     timerNextDelay = REGISTER_RETRY_INTERVAL * 1000;
                     wakeupHeartbeatThread();
+                    // 打印日志，表示连接已关闭，store 状态已更改为离线
                     log.error("Connection closed. The store state changes to {}",
                               Metapb.StoreState.Offline);
                 });
+
+                // 更新状态为 Up
                 onStateChanged(Metapb.StoreState.Up);
             } else {
+                // 如果 storeId 为 0，说明注册失败，设置下一次心跳间隔为注册重试间隔的一半
                 timerNextDelay = REGISTER_RETRY_INTERVAL * 1000 / 2;
             }
         } catch (PDException e) {
+            // 捕获异常
             int exceptCode = e.getErrorCode();
             if (exceptCode == Pdpb.ErrorType.STORE_ID_NOT_EXIST_VALUE) {
+                // 如果异常码为存储 ID 不存在
                 log.error(
                         "The store ID {} does not match the PD. Check that the correct PD is " +
                         "connected, " +
                         "and then delete the store ID!!!",
                         storeInfo.getId());
+                // 退出程序
                 System.exit(-1);
             } else if (exceptCode == Pdpb.ErrorType.STORE_HAS_BEEN_REMOVED_VALUE) {
+                // 如果异常码为存储已被删除
                 log.error("The store ID {} has been removed, please delete all data and restart!",
                           storeInfo.getId());
+                // 退出程序
                 System.exit(-1);
             } else if (exceptCode == Pdpb.ErrorType.STORE_PROHIBIT_DUPLICATE_VALUE) {
+                // 如果异常码为禁止重复存储
                 log.error(
                         "The store ID {} maybe duplicated, please check out store raft address " +
                         "and restart later!",
                         storeInfo.getId());
+                // 退出程序
                 System.exit(-1);
             }
         }

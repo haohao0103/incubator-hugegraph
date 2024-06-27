@@ -241,8 +241,11 @@ final class NotifyingExecutor {
 
     private Consumer<Throwable> notifyErrConsumer(HgNodeStatus status) {
         return t -> {
+            // 调用 nodeManager 的 notifying 方法，传入图名、HgStoreNotice 对象
             nodeManager.notifying(
+                    // 传入图名
                     this.graphName,
+                    // 创建一个 HgStoreNotice 对象，并传入节点 ID、节点状态、错误消息的字符串
                     HgStoreNotice.of(this.nodeSession.getStoreNode().getNodeId(), status,
                                      t.getMessage())
             );

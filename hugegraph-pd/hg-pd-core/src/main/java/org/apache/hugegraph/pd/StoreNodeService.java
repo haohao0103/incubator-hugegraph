@@ -78,16 +78,31 @@ public class StoreNodeService {
     private Metapb.ClusterStats clusterStats;
 
     public StoreNodeService(PDConfig config) {
+        // 将传入的配置赋值给成员变量pdConfig
         this.pdConfig = config;
+
+        // 调用MetadataFactory的newStoreInfoMeta方法创建StoreInfoMeta对象，并将配置作为参数传入
         storeInfoMeta = MetadataFactory.newStoreInfoMeta(pdConfig);
+
+        // 调用MetadataFactory的newTaskInfoMeta方法创建TaskInfoMeta对象，并将配置作为参数传入
         taskInfoMeta = MetadataFactory.newTaskInfoMeta(pdConfig);
+
+        // 创建一个线程安全的ArrayList，并将其赋值给shardGroupStatusListeners成员变量
         shardGroupStatusListeners = Collections.synchronizedList(new ArrayList<>());
+
+        // 创建一个线程安全的ArrayList，并将其赋值给statusListeners成员变量
         statusListeners = Collections.synchronizedList(new ArrayList<StoreStatusListener>());
+
+        // 创建一个Metapb.ClusterStats对象，并设置其状态为Cluster_Not_Ready，时间戳为当前时间戳
         clusterStats = Metapb.ClusterStats.newBuilder()
                                           .setState(Metapb.ClusterState.Cluster_Not_Ready)
                                           .setTimestamp(System.currentTimeMillis())
                                           .build();
+
+        // 创建一个KvService对象，并将配置作为参数传入
         kvService = new KvService(pdConfig);
+
+        // 创建一个ConfigService对象，并将配置作为参数传入
         configService = new ConfigService(pdConfig);
     }
 
@@ -705,6 +720,13 @@ public class StoreNodeService {
      * @param storeStats
      * @throws PDException
      */
+    /**
+     * 心跳函数，用于更新Store的状态信息，并返回集群状态信息。
+     *
+     * @param storeStats 存储节点的状态信息
+     * @return 集群状态信息
+     * @throws PDException 当Store不存在或者已经被移除时，抛出异常
+     */
     public Metapb.ClusterStats heartBeat(Metapb.StoreStats storeStats) throws PDException {
         this.storeInfoMeta.updateStoreStats(storeStats);
         Metapb.Store lastStore = this.getStore(storeStats.getStoreId());
@@ -813,7 +835,7 @@ public class StoreNodeService {
             if (activeStores.size() < pdConfig.getMinStoreCount()) {
                 builder.setState(Metapb.ClusterState.Cluster_Not_Ready);
                 builder.setMessage("The number of active stores is " + activeStores.size()
-                                   + ", less than pd.initial-store-count:" +
+                                   + ", less than pd.min-store-count:" +
                                    pdConfig.getMinStoreCount());
             }
             Map<Long, Metapb.Store> storeMap = new HashMap<>();

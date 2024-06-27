@@ -756,9 +756,14 @@ public class PartitionManager extends GlobalMetaStore {
 
     public List<String> shards2Peers(List<Metapb.Shard> shards) {
         List<String> peers = new ArrayList<>();
+        // 遍历分片列表
         shards.forEach(s -> {
+            // 获取分片对应的存储节点
+            // 调用getStore方法，传入分片的存储节点ID
+            // 获取存储节点的Raft地址
             peers.add(getStore(s.getStoreId()).getRaftAddress());
         });
+        // 返回节点列表
         return peers;
     }
 

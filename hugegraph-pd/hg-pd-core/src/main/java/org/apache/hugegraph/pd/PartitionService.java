@@ -937,6 +937,7 @@ public class PartitionService implements RaftStateListener {
      */
     public void partitionHeartbeat(Metapb.PartitionStats stats) throws PDException {
 
+        // 是从pd 存储中获取的数据，stats是从store 侧传入的partition信息
         Metapb.ShardGroup shardGroup = storeService.getShardGroup(stats.getId());
         // shard group version changes
         // (shard group 由pd控制, 在分裂等操作后，可能出现短暂不一致的情况，以pd为准）
@@ -944,6 +945,8 @@ public class PartitionService implements RaftStateListener {
         if (shardGroup != null &&
             (shardGroup.getVersion() < stats.getLeaderTerm() ||
              shardGroup.getConfVer() < stats.getConfVer())) {
+            // 如果进来说明partition 对应的shargroup 信息改变了
+//            onPartitionChanged();
             storeService.updateShardGroup(stats.getId(),
                                           stats.getShardList(), stats.getLeaderTerm(),
                                           stats.getConfVer());
@@ -965,27 +968,39 @@ public class PartitionService implements RaftStateListener {
      * @param stats
      */
     private void checkShardState(Metapb.Partition partition, Metapb.PartitionStats stats) {
-
         try {
+            // 离线shard的计数器
             int offCount = 0;
+            // 遍历分区统计信息中的每个shard统计信息
             for (Metapb.ShardStats shard : stats.getShardStatsList()) {
+                // 如果shard状态为离线
                 if (shard.getState() == Metapb.ShardState.SState_Offline) {
+                    // 离线shard计数器加一
                     offCount++;
                 }
             }
+
+            // 如果分区状态不是离线状态
             if (partition.getState() != Metapb.PartitionState.PState_Offline) {
+                // 如果离线shard计数为0
                 if (offCount == 0) {
+                    // 更新分区状态为正常
                     updatePartitionState(partition.getGraphName(), partition.getId(),
                                          Metapb.PartitionState.PState_Normal);
+                // 如果离线shard数量少于shard总数的一半
                 } else if (offCount * 2 < stats.getShardStatsCount()) {
+                    // 更新分区状态为警告
                     updatePartitionState(partition.getGraphName(), partition.getId(),
                                          Metapb.PartitionState.PState_Warn);
+                // 否则
                 } else {
+                    // 更新分区状态为警告（此处的else分支和上面的else if分支代码相同，可能是冗余的）
                     updatePartitionState(partition.getGraphName(), partition.getId(),
                                          Metapb.PartitionState.PState_Warn);
                 }
             }
         } catch (Exception e) {
+            // 打印异常日志
             log.error("Partition {}-{} checkShardState exception {}",
                       partition.getGraphName(), partition.getId(), e);
         }

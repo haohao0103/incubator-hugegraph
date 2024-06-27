@@ -144,10 +144,15 @@ public final class PDPulseImpl implements PDPulse {
         }
 
         void init() {
+            // 创建一个PulseCreateRequest的Builder对象，并设置其pulseType属性为当前对象的pulseType属性
             PulseCreateRequest.Builder builder = PulseCreateRequest.newBuilder()
                                                                    .setPulseType(this.pulseType);
 
+            // 获取PDPulseImpl对象的stub属性，并调用其pulse方法，传入当前对象作为参数，将返回的RequestStream赋值给this.reqStream
             this.reqStream = PDPulseImpl.this.stub.pulse(this);
+
+            // 调用reqBuilder的clear方法清空之前的设置，然后设置其createRequest属性为builder对象，
+            // 最后调用build方法生成一个PulseRequest对象，并将其发送给reqStream
             this.reqStream.onNext(reqBuilder.clear().setCreateRequest(builder).build());
         }
 

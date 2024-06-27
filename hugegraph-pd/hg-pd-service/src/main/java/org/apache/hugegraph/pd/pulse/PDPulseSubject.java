@@ -337,18 +337,24 @@ public class PDPulseSubject {
         }
 
         private void addObserver(PulseCreateRequest request) {
+            // 如果subject不为空，则直接返回
             if (this.subject != null) {
                 return;
             }
 
+            // 获取脉冲类型
             PulseType pulseType = getPulseType(request);
+            // 如果脉冲类型为空，则直接返回
             if (pulseType == null) {
                 return;
             }
 
+            // 根据脉冲类型获取subject
             this.subject = getSubject(pulseType);
+            // 创建观察者ID
             this.observerId = createObserverId();
 
+            // 向subject中添加观察者
             this.subject.addObserver(this.observerId, this.responseObserver);
         }
 
@@ -370,14 +376,19 @@ public class PDPulseSubject {
         }
 
         private AbstractObserverSubject getSubject(PulseType pulseType) {
+            // 从subjectHolder中根据脉冲类型的名称获取对应的观察者主体
             AbstractObserverSubject subject = subjectHolder.get(pulseType.name());
 
+            // 如果观察者主体为空
             if (subject == null) {
+                // 调用responseObserver的onError方法，传入一个异常对象，表示不支持的脉冲类型
                 responseObserver.onError(
                     new Exception("Unsupported pulse-type: " + pulseType.name()));
+                // 返回null
                 return null;
             }
 
+            // 返回观察者主体
             return subject;
         }
 
@@ -406,26 +417,43 @@ public class PDPulseSubject {
             }
         }
 
+        /**
+         * 接收来自pdpulseimpl 发送的请求
+         *
+         * @param pulseRequest 接收到的脉冲请求
+         */
         @Override
         public void onNext(PulseRequest pulseRequest) {
-
+            // 如果请求包含创建请求
             if (pulseRequest.hasCreateRequest()) {
+                // 添加观察者
                 this.addObserver(pulseRequest.getCreateRequest());
+                // 结束方法
                 return;
             }
 
+            // 如果请求包含取消请求
             if (pulseRequest.hasCancelRequest()) {
+                // 取消观察者
                 this.cancelObserver();
+                // 结束方法
                 return;
             }
 
+            // 如果请求包含通知请求
             if (pulseRequest.hasNoticeRequest()) {
+                // 处理通知
                 this.handleNotice(pulseRequest.getNoticeRequest());
             }
 
+            // 如果请求包含确认请求
             if (pulseRequest.hasAckRequest()) {
+                // 确认通知
                 this.ackNotice(pulseRequest.getAckRequest().getNoticeId()
-                    , pulseRequest.getAckRequest().getObserverId());
+                        // 通知ID
+                        , pulseRequest.getAckRequest().getObserverId()
+                        // 观察者ID
+                );
             }
         }
 
