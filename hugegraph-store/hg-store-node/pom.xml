@@ -143,6 +143,12 @@
             <artifactId>log4j-api</artifactId>
             <version>2.17.2</version>
         </dependency>
+        <!-- JUL到Log4j 2的桥接 -->
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-jul</artifactId>
+            <version>2.17.2</version> <!-- 使用与log4j-core相同的版本 -->
+        </dependency>
         <!-- module end -->
     </dependencies>
 
