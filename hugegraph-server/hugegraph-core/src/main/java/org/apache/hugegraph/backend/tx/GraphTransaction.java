@@ -929,6 +929,7 @@ public class GraphTransaction extends IndexableTransaction {
         return edge;
     }
 
+    // 基于edgeid查询边数据，似乎还是要把查询条件转化为query来执行，这个query是IdQuery类型
     protected Iterator<Edge> queryEdgesByIds(Object[] edgeIds,
                                              boolean verifyId) {
         Query.checkForceCapacity(edgeIds.length);
@@ -938,6 +939,8 @@ public class GraphTransaction extends IndexableTransaction {
         Map<Id, HugeEdge> edges = new HashMap<>(edgeIds.length);
 
         IdQuery query = new IdQuery(HugeType.EDGE);
+        // 如果 edgeId 既不在 removedEdges 中，也不在 addedEdges 或 updatedEdges 中，
+        // 则将其加入 IdQuery 中，准备从后端存储查询。
         for (Object edgeId : edgeIds) {
             HugeEdge edge;
             EdgeId id = HugeEdge.getIdValue(edgeId, !verifyId);
@@ -966,6 +969,8 @@ public class GraphTransaction extends IndexableTransaction {
 
         if (!query.empty()) {
             // Query from backend store
+            // 如果 edges 为空且 query.idsSize() 等于 ids.size()，
+            // 说明所有 edgeId 都需要从后端查询，直接返回查询结果。
             if (edges.isEmpty() && query.idsSize() == ids.size()) {
                 /*
                  * Sort at the lower layer and return directly if there is no
@@ -2218,5 +2223,14 @@ public class GraphTransaction extends IndexableTransaction {
 
     public void removeOlapPk(Id pkId) {
         this.store().removeOlapTable(pkId);
+    }
+
+    protected final Collection<HugeEdge> edgesInTxUpdated() {
+        List<HugeEdge> edges =
+                new ArrayList<>(this.addedEdges.size()+this.updatedEdges.size()+this.removedEdges.size());
+        edges.addAll(this.updatedEdges.values());
+        edges.addAll(this.addedEdges.values());
+        edges.addAll(this.removedEdges.values());
+        return edges;
     }
 }

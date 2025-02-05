@@ -313,4 +313,15 @@ public class ServerOptions extends OptionHolder {
                     nonNegativeInt(),
                     1000L
             );
+
+
+
+    public static final ConfigOption<Integer> RESPONSE_LENGTH_LOG_THRESHOLD =
+            new ConfigOption<>(
+                    "log.response_length_threshold",
+                    "The threshold length(bytes) of response body log " ,
+                    nonNegativeInt(),
+                    1000
+            );
+
 }

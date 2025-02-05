@@ -28,9 +28,7 @@ import java.util.Set;
 import org.apache.hugegraph.HugeGraphParams;
 import org.apache.hugegraph.backend.cache.CachedBackendStore.QueryId;
 import org.apache.hugegraph.backend.id.Id;
-import org.apache.hugegraph.backend.query.IdQuery;
-import org.apache.hugegraph.backend.query.Query;
-import org.apache.hugegraph.backend.query.QueryResults;
+import org.apache.hugegraph.backend.query.*;
 import org.apache.hugegraph.backend.store.BackendMutation;
 import org.apache.hugegraph.backend.store.BackendStore;
 import org.apache.hugegraph.backend.store.ram.RamTable;
@@ -47,10 +45,13 @@ import org.apache.hugegraph.schema.IndexLabel;
 import org.apache.hugegraph.structure.HugeEdge;
 import org.apache.hugegraph.structure.HugeVertex;
 import org.apache.hugegraph.type.HugeType;
+import org.apache.hugegraph.type.define.HugeKeys;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Events;
 
 import com.google.common.collect.ImmutableSet;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public final class CachedGraphTransaction extends GraphTransaction {
 
@@ -62,9 +63,18 @@ public final class CachedGraphTransaction extends GraphTransaction {
 
     private final Cache<Id, Object> verticesCache;
     private final Cache<Id, Object> edgesCache;
+    /**
+     * vertexId -> queryId
+     * For cases where the  automatic expiration of edgeCache causes queryId invalidation,
+     * the scheduled task of edge2VertexIndex will clean up expired queryIds.
+     */
+    private final VertexToEdgeLookupCache vertex2EdgeQueriesIndex;
+
 
     private EventListener storeEventListener;
     private EventListener cacheEventListener;
+    private static final Logger LOG = LoggerFactory.getLogger(CachedGraphTransaction.class);
+
 
     public CachedGraphTransaction(HugeGraphParams graph, BackendStore store) {
         super(graph, store);
@@ -75,13 +85,14 @@ public final class CachedGraphTransaction extends GraphTransaction {
         long capacity = conf.get(CoreOptions.VERTEX_CACHE_CAPACITY);
         int expire = conf.get(CoreOptions.VERTEX_CACHE_EXPIRE);
         this.verticesCache = this.cache("vertex", type, capacity,
-                                        AVG_VERTEX_ENTRY_SIZE, expire);
+                AVG_VERTEX_ENTRY_SIZE, expire);
 
         type = conf.get(CoreOptions.EDGE_CACHE_TYPE);
         capacity = conf.get(CoreOptions.EDGE_CACHE_CAPACITY);
         expire = conf.get(CoreOptions.EDGE_CACHE_EXPIRE);
         this.edgesCache = this.cache("edge", type, capacity,
-                                     AVG_EDGE_ENTRY_SIZE, expire);
+                AVG_EDGE_ENTRY_SIZE, expire);
+        this.vertex2EdgeQueriesIndex =CacheManager.instance().lookup("vertexToEdge-" + this.params().name());
 
         this.listenChanges();
     }
@@ -106,8 +117,8 @@ public final class CachedGraphTransaction extends GraphTransaction {
             case "l2":
                 long heapCapacity = (long) (DEFAULT_LEVEL_RATIO * capacity);
                 cache = CacheManager.instance().levelCache(super.graph(),
-                                                           name, heapCapacity,
-                                                           capacity, entrySize);
+                        name, heapCapacity,
+                        capacity, entrySize);
                 break;
             default:
                 throw new NotSupportException("cache type '%s'", type);
@@ -116,18 +127,22 @@ public final class CachedGraphTransaction extends GraphTransaction {
         cache.expire(expire * 1000L);
         // Enable metrics for graph cache by default
         cache.enableMetrics(true);
+        if(prefix.equals("edge")){
+            CacheManager.instance().lookup("vertexToEdge-" + this.params().name(), capacity,cache);
+        }
         return cache;
     }
+
 
     private void listenChanges() {
         // Listen store event: "store.init", "store.clear", ...
         Set<String> storeEvents = ImmutableSet.of(Events.STORE_INIT,
-                                                  Events.STORE_CLEAR,
-                                                  Events.STORE_TRUNCATE);
+                Events.STORE_CLEAR,
+                Events.STORE_TRUNCATE);
         this.storeEventListener = event -> {
             if (storeEvents.contains(event.name())) {
                 LOG.debug("Graph {} clear graph cache on event '{}'",
-                          this.graph(), event.name());
+                        this.graph(), event.name());
                 this.clearCache(null, true);
                 return true;
             }
@@ -138,10 +153,10 @@ public final class CachedGraphTransaction extends GraphTransaction {
         // Listen cache event: "cache"(invalid cache item)
         this.cacheEventListener = event -> {
             LOG.debug("Graph {} received graph cache event: {}",
-                      this.graph(), event);
+                    this.graph(), event);
             Object[] args = event.args();
             E.checkArgument(args.length > 0 && args[0] instanceof String,
-                            "Expect event action argument");
+                    "Expect event action argument");
             if (Cache.ACTION_INVALID.equals(args[0])) {
                 event.checkArgs(String.class, HugeType.class, Object.class);
                 HugeType type = (HugeType) args[1];
@@ -156,14 +171,14 @@ public final class CachedGraphTransaction extends GraphTransaction {
                         for (int i = 0; i < size; i++) {
                             Object id = Array.get(arg2, i);
                             E.checkArgument(id instanceof Id,
-                                            "Expect instance of Id in array, " +
+                                    "Expect instance of Id in array, " +
                                             "but got '%s'", id.getClass());
                             this.verticesCache.invalidate((Id) id);
                         }
                     } else {
                         E.checkArgument(false,
-                                        "Expect Id or Id[], but got: %s",
-                                        arg2);
+                                "Expect Id or Id[], but got: %s",
+                                arg2);
                     }
                 } else if (type.isEdge()) {
                     /*
@@ -172,6 +187,30 @@ public final class CachedGraphTransaction extends GraphTransaction {
                      */
                     // this.edgesCache.invalidate(id);
                     this.edgesCache.clear();
+                }else if (type.isEdgeVertex()) {
+                    // 接收到的是vertexIds，但是要对edgeCache进行处理不是对vertexCache进行处理
+                    // Invalidate edge cache
+                    Object arg2 = args[2];
+                    if (arg2 instanceof Id) {
+                        Id id = (Id) arg2;
+                        this.vertex2EdgeQueriesIndex.remove(id);
+                    } else if (arg2 != null && arg2.getClass().isArray()) {
+                        int size = Array.getLength(arg2);
+                        if (size > 0){
+                            for (int i = 0; i < size; i++) {
+                                Object id = Array.get(arg2, i);
+                                E.checkArgument(id instanceof Id,
+                                        "Expect instance of Id in array, " +
+                                                "but got '%s'", id.getClass());
+                                this.vertex2EdgeQueriesIndex.remove((Id) id);
+                            }
+                        }
+
+                    } else {
+                        E.checkArgument(false,
+                                "Expect Id or Id[], but got: %s",
+                                arg2);
+                    }
                 }
                 return true;
             } else if (Cache.ACTION_CLEAR.equals(args[0])) {
@@ -236,7 +275,7 @@ public final class CachedGraphTransaction extends GraphTransaction {
     @Watched(prefix = "graphcache")
     protected Iterator<HugeVertex> queryVerticesFromBackend(Query query) {
         if (this.enableCacheVertex() &&
-            query.idsSize() > 0 && query.conditionsSize() == 0) {
+                query.idsSize() > 0 && query.conditionsSize() == 0) {
             return this.queryVerticesByIds((IdQuery) query);
         } else {
             return super.queryVerticesFromBackend(query);
@@ -313,7 +352,7 @@ public final class CachedGraphTransaction extends GraphTransaction {
         }
 
         if (!this.enableCacheEdge() || query.empty() ||
-            query.paging() || query.bigCapacity()) {
+                query.paging() || query.bigCapacity()) {
             // Query all edges or query edges in paging, don't cache it
             return super.queryEdgesFromBackend(query);
         }
@@ -332,7 +371,7 @@ public final class CachedGraphTransaction extends GraphTransaction {
             }
         }
 
-        if (value != null) {
+        if (value != null) {  // 从缓存中获取了数据
             // Not cached or the cache expired
             return edges.iterator();
         }
@@ -352,11 +391,51 @@ public final class CachedGraphTransaction extends GraphTransaction {
 
         if (edges.isEmpty()) {
             this.edgesCache.update(cacheKey, Collections.emptyList());
+            updateEdgeCacheAndIndex(this.vertex2EdgeQueriesIndex, cacheKey, query);
         } else if (edges.size() <= MAX_CACHE_EDGES_PER_QUERY) {
             this.edgesCache.update(cacheKey, edges);
+            updateEdgeCacheAndIndex(this.vertex2EdgeQueriesIndex, cacheKey, query);
         }
 
+
+
+
         return new ExtendableIterator<>(edges.iterator(), rs);
+    }
+
+
+    /**
+     * 更新边缓存和顶点到边的查询索引
+     *
+     * @param vertex2EdgeQueriesIndex 顶点到边的查询索引
+     * @param cacheKey 缓存键（QueryId）
+     * @param query 查询对象
+     */
+    private void updateEdgeCacheAndIndex(
+                                         VertexToEdgeLookupCache vertex2EdgeQueriesIndex,
+                                         Id cacheKey,
+                                         Query query) {
+
+
+
+        // 更新顶点到边的查询索引
+        for (Id id : query.ids()) {
+            vertex2EdgeQueriesIndex.update(id, cacheKey);
+        }
+        // 如果是条件查询，处理 OWNER_VERTEX 条件
+        if (query instanceof ConditionQuery) {
+            ConditionQuery cq = (ConditionQuery) query;
+            Object vertex = cq.condition(HugeKeys.OWNER_VERTEX);
+            if (vertex != null) {
+                if (vertex instanceof Id) {
+                    vertex2EdgeQueriesIndex.update((Id) vertex, cacheKey);
+                } else if (vertex instanceof Collection) {
+                    for (Id id : (Collection<Id>) vertex) {
+                        vertex2EdgeQueriesIndex.update(id, cacheKey);
+                    }
+                }
+            }
+        }
     }
 
     @Override
@@ -366,7 +445,13 @@ public final class CachedGraphTransaction extends GraphTransaction {
         Collection<HugeVertex> updates = this.verticesInTxUpdated();
         Collection<HugeVertex> deletions = this.verticesInTxRemoved();
         Id[] vertexIds = new Id[updates.size() + deletions.size()];
+        Id[] deletedVertexIds = new Id[ deletions.size()];
+
         int vertexOffset = 0;
+        int deleteOffset = 0;
+        int edgeVertexOffset = 0;
+        Collection<HugeEdge> updateEdges = this.edgesInTxUpdated();
+        Id[] edgeVertexIds = new Id[ updateEdges.size()*2];
 
         int edgesInTxSize = this.edgesInTxSize();
 
@@ -392,25 +477,29 @@ public final class CachedGraphTransaction extends GraphTransaction {
                     vertexIds[vertexOffset++] = vertex.id();
                     this.verticesCache.invalidate(vertex.id());
                 }
-
-                //TODO Temporary to resolve the memory leak issue; future optimization is needed ,
-                // it essentially pertains to the consistency  of caches across multi graph server nodes.
-//                if (vertexOffset > 0) {
-//                    this.notifyChanges(Cache.ACTION_INVALIDED,
-//                                       HugeType.VERTEX, vertexIds);
-//                }
+                if (vertexOffset > 0) {
+                    this.notifyChanges(Cache.ACTION_INVALIDED,
+                            HugeType.VERTEX, vertexIds);
+                }
             }
 
-            /*
-             * Update edge cache if any vertex or edge changed
-             * For vertex change, the edges linked with should also be updated
-             * Before we find a more precise strategy, just clear all the edge cache now
-             */
-            boolean invalidEdgesCache = (edgesInTxSize + updates.size() + deletions.size()) > 0;
-            if (invalidEdgesCache && this.enableCacheEdge()) {
-                // TODO: Use a more precise strategy to update the edge cache
-                this.edgesCache.clear();
-                this.notifyChanges(Cache.ACTION_CLEARED, HugeType.EDGE);
+            if (this.enableCacheEdge()) {
+                // 处理新增、更新、删除边 在本地缓存的数据，invalid操作
+                for (HugeEdge updateEdge : updateEdges) {
+                    Id sourceVertexId = updateEdge.sourceVertex().id();
+                    Id targetVertexId = updateEdge.targetVertex().id();
+                    edgeVertexIds[edgeVertexOffset++] = sourceVertexId;
+                    edgeVertexIds[edgeVertexOffset++] = targetVertexId;
+                    // 基于这两个ID去到vertex2EdgeQueryIndex中获取所有关联的queryId,进行缓存失效动作
+                    vertex2EdgeQueriesIndex.remove(sourceVertexId);
+                    vertex2EdgeQueriesIndex.remove(targetVertexId);
+                    vertex2EdgeQueriesIndex.remove(updateEdge.id());
+
+                }
+                if (edgeVertexOffset > 0) {
+                    // ConditionQuery
+                    this.notifyChanges(Cache.ACTION_INVALIDED, HugeType.EDGE, edgeVertexIds);
+                }
             }
         }
     }

@@ -185,7 +185,7 @@ public class CachedBackendStore implements BackendStore {
     /**
      * Query as an Id for cache
      */
-    static class QueryId implements Id {
+   public static class QueryId implements Id {
 
         private String query;
         private int hashCode;
