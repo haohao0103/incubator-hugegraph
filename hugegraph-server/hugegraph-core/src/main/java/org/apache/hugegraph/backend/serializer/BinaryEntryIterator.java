@@ -25,8 +25,12 @@ import org.apache.hugegraph.backend.store.BackendEntry;
 import org.apache.hugegraph.backend.store.BackendEntry.BackendIterator;
 import org.apache.hugegraph.backend.store.BackendEntryIterator;
 import org.apache.hugegraph.util.E;
+import org.apache.hugegraph.util.Log;
+import org.slf4j.Logger;
 
 public class BinaryEntryIterator<Elem> extends BackendEntryIterator {
+
+    private static final Logger LOG = Log.logger(BinaryEntryIterator.class);
 
     protected final BackendIterator<Elem> results;
     protected final BiFunction<BackendEntry, Elem, BackendEntry> merger;
@@ -56,6 +60,28 @@ public class BinaryEntryIterator<Elem> extends BackendEntryIterator {
     @Override
     public void close() throws Exception {
         this.results.close();
+    }
+
+    /**
+     * Safety net: if this iterator is garbage-collected without being
+     * explicitly closed, ensure the underlying backend iterator resources
+     * (e.g. HBase ResultScanner) are released.
+     */
+    @SuppressWarnings({"removal", "deprecation"})
+    @Override
+    protected void finalize() throws Throwable {
+        try {
+            if (this.results != null) {
+                this.results.close();
+                LOG.warn("BinaryEntryIterator finalized without explicit close. " +
+                         "This indicates a resource leak path was triggered, " +
+                         "likely due to an interrupted/timeout query.");
+            }
+        } catch (Exception ignored) {
+            // Finalizer must not throw
+        } finally {
+            super.finalize();
+        }
     }
 
     @Override

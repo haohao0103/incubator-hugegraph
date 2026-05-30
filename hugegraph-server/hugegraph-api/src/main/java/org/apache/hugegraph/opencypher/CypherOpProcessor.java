@@ -49,6 +49,7 @@ import org.apache.tinkerpop.gremlin.server.OpProcessor;
 import org.apache.tinkerpop.gremlin.server.op.AbstractEvalOpProcessor;
 import org.apache.tinkerpop.gremlin.server.op.OpProcessorException;
 import org.apache.tinkerpop.gremlin.structure.Graph;
+import org.apache.tinkerpop.gremlin.structure.util.CloseableIterator;
 import org.apache.tinkerpop.gremlin.util.function.ThrowingConsumer;
 import org.opencypher.gremlin.translation.CypherAst;
 import org.opencypher.gremlin.translation.groovy.GroovyPredicate;
@@ -237,6 +238,39 @@ public class CypherOpProcessor extends AbstractEvalOpProcessor {
                                                  .statusMessage(errorMessage)
                                                  .statusAttributeException(ex)
                                                  .create());
+            } finally {
+                /*
+                 * Ensure the traversal iterator chain is closed to release
+                 * underlying backend resources (e.g. HBase ResultScanner).
+                 * Without this, a timeout/interrupt can leak backend iterators
+                 * and their associated server-side scanner resources.
+                 */
+                try {
+                    CloseableIterator.closeIterator(traversal);
+                } catch (Exception e) {
+                    logger.warn("Failed to close traversal iterator", e);
+                }
+
+                /*
+                 * Close the graph transaction on the current thread to
+                 * release the HBase session back to the pool. This prevents
+                 * ThreadLocal transaction leaks when a query times out.
+                 * NOTE: close() triggers ROLLBACK behavior by default, then
+                 * closes the underlying BackendStore which releases the
+                 * BackendSession (detach) from the session pool.
+                 */
+                try {
+                    GraphManager manager = context.getGraphManager();
+                    for (String graphName : manager.getGraphNames()) {
+                        Graph graph = manager.getGraph(graphName);
+                        if (graph != null && graph.tx().isOpen()) {
+                            graph.tx().close();
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.warn("Failed to close graph transaction after " +
+                                "traversal error", e);
+                }
             }
             return null;
         }

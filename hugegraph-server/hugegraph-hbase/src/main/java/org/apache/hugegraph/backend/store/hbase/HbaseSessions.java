@@ -909,6 +909,8 @@ public class HbaseSessions extends BackendSessionPool {
 
     protected static class RowIterator implements BackendIterator<Result> {
 
+        private static final Logger LOG = Log.logger(RowIterator.class);
+
         private final ResultScanner resultScanner;
         private final Iterator<Result> results;
 
@@ -958,6 +960,29 @@ public class HbaseSessions extends BackendSessionPool {
         public void close() {
             if (this.resultScanner != null) {
                 this.resultScanner.close();
+            }
+        }
+
+        /**
+         * Safety net: if this RowIterator is garbage-collected without
+         * being explicitly closed (e.g. due to a timeout/interrupt that
+         * skips the normal close path), close the underlying HBase
+         * ResultScanner to release server-side scanner resources.
+         */
+        @SuppressWarnings({"removal", "deprecation"})
+        @Override
+        protected void finalize() throws Throwable {
+            try {
+                if (this.resultScanner != null) {
+                    this.resultScanner.close();
+                    LOG.warn("RowIterator finalized without explicit close. " +
+                             "This indicates a resource leak path was " +
+                             "triggered, likely due to an interrupted/timeout query.");
+                }
+            } catch (Exception ignored) {
+                // Finalizer must not throw
+            } finally {
+                super.finalize();
             }
         }
 
