@@ -30,6 +30,7 @@ import org.apache.hugegraph.backend.query.ConditionQuery;
 import org.apache.hugegraph.backend.store.Shard;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.structure.HugeEdge;
+import org.apache.tinkerpop.gremlin.structure.util.CloseableIterator;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.Log;
@@ -77,7 +78,11 @@ public class EdgesAPI extends API {
         HugeGraph g = graph(manager, graphSpace, graph);
 
         Iterator<Edge> edges = g.edges(ids);
-        return manager.serializer().writeEdges(edges, false);
+        try {
+            return manager.serializer().writeEdges(edges, false);
+        } finally {
+            CloseableIterator.closeIterator(edges);
+        }
     }
 
     @GET
@@ -124,6 +129,10 @@ public class EdgesAPI extends API {
         }
         Iterator<Edge> edges = g.edges(query);
 
-        return manager.serializer().writeEdges(edges, query.paging());
+        try {
+            return manager.serializer().writeEdges(edges, query.paging());
+        } finally {
+            CloseableIterator.closeIterator(edges);
+        }
     }
 }

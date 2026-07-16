@@ -29,6 +29,7 @@ import org.apache.hugegraph.api.graph.VertexAPI;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.query.ConditionQuery;
 import org.apache.hugegraph.backend.store.Shard;
+import org.apache.tinkerpop.gremlin.structure.util.CloseableIterator;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.util.E;
@@ -80,7 +81,11 @@ public class VerticesAPI extends API {
         HugeGraph g = graph(manager, graphSpace, graph);
 
         Iterator<Vertex> vertices = g.vertices(ids);
-        return manager.serializer().writeVertices(vertices, false);
+        try {
+            return manager.serializer().writeVertices(vertices, false);
+        } finally {
+            CloseableIterator.closeIterator(vertices);
+        }
     }
 
     @GET
@@ -126,6 +131,10 @@ public class VerticesAPI extends API {
         }
         Iterator<Vertex> vertices = g.vertices(query);
 
-        return manager.serializer().writeVertices(vertices, query.paging());
+        try {
+            return manager.serializer().writeVertices(vertices, query.paging());
+        } finally {
+            CloseableIterator.closeIterator(vertices);
+        }
     }
 }

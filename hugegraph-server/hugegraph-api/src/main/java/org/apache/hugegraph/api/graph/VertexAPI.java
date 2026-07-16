@@ -299,6 +299,13 @@ public class VertexAPI extends BatchAPI {
         try {
             return manager.serializer().writeVertices(traversal, page != null);
         } finally {
+            // Close the traversal to release backend iterators (e.g. BinaryEntryIterator)
+            // when the client disconnects mid-stream; otherwise GC finalizer leaks.
+            try {
+                traversal.close();
+            } catch (Exception ignored) {
+                // Best-effort close
+            }
             if (g.tx().isOpen()) {
                 g.tx().close();
             }

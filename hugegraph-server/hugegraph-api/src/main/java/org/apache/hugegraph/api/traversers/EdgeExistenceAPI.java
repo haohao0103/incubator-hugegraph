@@ -27,6 +27,7 @@ import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.core.GraphManager;
 import org.apache.hugegraph.traversal.algorithm.EdgeExistenceTraverser;
 import org.apache.hugegraph.util.E;
+import org.apache.tinkerpop.gremlin.structure.util.CloseableIterator;
 import org.apache.hugegraph.util.Log;
 import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.slf4j.Logger;
@@ -80,6 +81,10 @@ public class EdgeExistenceAPI extends TraverserAPI {
         Iterator<Edge> edges = traverser.queryEdgeExistence(sourceId, targetId, edgeLabel,
                                                             sortValues, limit);
 
-        return manager.serializer(hugegraph).writeEdges(edges, false);
+        try {
+            return manager.serializer(hugegraph).writeEdges(edges, false);
+        } finally {
+            CloseableIterator.closeIterator(edges);
+        }
     }
 }

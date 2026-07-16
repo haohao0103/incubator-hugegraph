@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.backend.serializer;
 
+import java.lang.ref.Cleaner;
 import java.util.function.BiFunction;
 
 import org.apache.hugegraph.backend.page.PageState;
@@ -32,10 +33,47 @@ public class BinaryEntryIterator<Elem> extends BackendEntryIterator {
 
     private static final Logger LOG = Log.logger(BinaryEntryIterator.class);
 
+    /**
+     * Cleaner-based safety net: replaces the deprecated finalize() method.
+     * If this iterator is garbage-collected without being explicitly closed,
+     * the Cleaner releases the underlying backend iterator resources
+     * (e.g. HBase ResultScanner, RocksDB snapshot).
+     */
+    private static final Cleaner CLEANER = Cleaner.create();
+
+    /**
+     * Static cleaning state — must NOT hold a reference to the outer
+     * BinaryEntryIterator, otherwise it would prevent GC of the iterator.
+     * Only holds the backend iterator that needs closing.
+     */
+    private static final class CleaningState implements Runnable {
+        private final BackendIterator<?> results;
+
+        CleaningState(BackendIterator<?> results) {
+            this.results = results;
+        }
+
+        @Override
+        public void run() {
+            if (this.results != null) {
+                try {
+                    this.results.close();
+                    LOG.warn("BinaryEntryIterator cleaned without explicit close. " +
+                             "This indicates a resource leak path was triggered, " +
+                             "likely due to an interrupted/timeout query.");
+                } catch (Exception ignored) {
+                    // Cleaner action must not throw
+                }
+            }
+        }
+    }
+
     protected final BackendIterator<Elem> results;
     protected final BiFunction<BackendEntry, Elem, BackendEntry> merger;
 
     protected BackendEntry next;
+
+    private final Cleaner.Cleanable cleanable;
 
     public BinaryEntryIterator(BackendIterator<Elem> results, Query query,
                                BiFunction<BackendEntry, Elem, BackendEntry> m) {
@@ -48,6 +86,10 @@ public class BinaryEntryIterator<Elem> extends BackendEntryIterator {
         this.merger = m;
         this.next = null;
 
+        // Register with Cleaner so resources are released even if close() is
+        // never called (e.g. client disconnect mid-stream).
+        this.cleanable = CLEANER.register(this, new CleaningState(results));
+
         if (query.paging()) {
             assert query.offset() == 0L;
             assert PageState.fromString(query.page()).offset() == 0;
@@ -59,28 +101,15 @@ public class BinaryEntryIterator<Elem> extends BackendEntryIterator {
 
     @Override
     public void close() throws Exception {
-        this.results.close();
-    }
-
-    /**
-     * Safety net: if this iterator is garbage-collected without being
-     * explicitly closed, ensure the underlying backend iterator resources
-     * (e.g. HBase ResultScanner) are released.
-     */
-    @SuppressWarnings({"removal", "deprecation"})
-    @Override
-    protected void finalize() throws Throwable {
+        // cleanable.clean() is idempotent and releases the Cleaner's reference,
+        // so the cleaning action won't run again on GC.
+        this.cleanable.clean();
+        // Also close directly for immediate effect (results.close() is safe to
+        // call multiple times for most backend implementations).
         try {
-            if (this.results != null) {
-                this.results.close();
-                LOG.warn("BinaryEntryIterator finalized without explicit close. " +
-                         "This indicates a resource leak path was triggered, " +
-                         "likely due to an interrupted/timeout query.");
-            }
+            this.results.close();
         } catch (Exception ignored) {
-            // Finalizer must not throw
-        } finally {
-            super.finalize();
+            // Best-effort
         }
     }
 
