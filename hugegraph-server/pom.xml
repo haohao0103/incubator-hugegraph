@@ -70,6 +70,7 @@
         <module>hugegraph-mysql</module>
         <module>hugegraph-palo</module>
         <module>hugegraph-hbase</module>
+        <module>hugegraph-obkv</module>
         <module>hugegraph-postgresql</module>
         <module>hugegraph-hstore</module>
     </modules>

@@ -85,6 +85,9 @@ public class RegisterUtil {
             case "hstore":
                 registerHstore();
                 break;
+            case "obkv":
+                registerObkv();
+                break;
             default:
                 throw new HugeException("Unsupported backend type '%s'", backend);
         }
@@ -123,6 +126,15 @@ public class RegisterUtil {
         // Register backend
         BackendProviderFactory.register("hstore",
                                         "org.apache.hugegraph.backend.store.hstore.HstoreProvider");
+    }
+
+    public static void registerObkv() {
+        OptionSpace.register("obkv",
+                             "org.apache.hugegraph.backend.store.obkv.ObkvOptions");
+        SerializerFactory.register("obkv",
+                                   "org.apache.hugegraph.backend.store.obkv.ObkvSerializer");
+        BackendProviderFactory.register("obkv",
+                                        "org.apache.hugegraph.backend.store.obkv.ObkvStoreProvider");
     }
 
     public static void registerServer() {

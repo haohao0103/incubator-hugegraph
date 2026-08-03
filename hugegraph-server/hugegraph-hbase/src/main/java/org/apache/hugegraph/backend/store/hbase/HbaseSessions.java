@@ -90,6 +90,7 @@ public class HbaseSessions extends BackendSessionPool {
     private static final String COPROCESSOR_AGGR =
             "org.apache.hadoop.hbase.coprocessor.AggregateImplementation";
     private static final long SCANNER_CACHING = 1000L;
+    private static final String CONNECTION_IMPL = "hbase.client.connection.impl";
 
     private final String namespace;
     private Connection hbase;
@@ -97,6 +98,20 @@ public class HbaseSessions extends BackendSessionPool {
     public HbaseSessions(HugeConfig config, String namespace, String store) {
         super(config, namespace + "/" + store);
         this.namespace = namespace;
+    }
+
+    /**
+     * Allows a compatible HBase client (for example OBKV-HBase 2.x) to
+     * provide the Connection implementation without changing the HugeGraph
+     * table/query layer. The client class must implement HBase 2.x Connection.
+     */
+    protected String connectionImplementation() {
+        return null;
+    }
+
+    protected void configureConnection(Configuration configuration,
+                                      HugeConfig config) {
+        // Default HBase configuration is assembled in open().
     }
 
     protected Connection hbase() {
@@ -140,6 +155,12 @@ public class HbaseSessions extends BackendSessionPool {
 
         String hbaseSite = config.get(HbaseOptions.HBASE_HBASE_SITE);
         hConfig.addResource(new Path(hbaseSite));
+
+        String connectionImpl = this.connectionImplementation();
+        if (connectionImpl != null && !connectionImpl.isEmpty()) {
+            hConfig.set(CONNECTION_IMPL, connectionImpl);
+        }
+        this.configureConnection(hConfig, config);
 
         if (isEnableKerberos) {
             String krb5Conf = config.get(HbaseOptions.HBASE_KRB5_CONF);

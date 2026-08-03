@@ -96,6 +96,11 @@
         </dependency>
         <dependency>
             <groupId>org.apache.hugegraph</groupId>
+            <artifactId>hugegraph-obkv</artifactId>
+            <version>${revision}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.hugegraph</groupId>
             <artifactId>hugegraph-postgresql</artifactId>
             <version>${revision}</version>
         </dependency>

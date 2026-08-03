@@ -114,6 +114,10 @@ public abstract class HbaseStore extends AbstractBackendStore<HbaseSessions.Sess
                           .collect(Collectors.toList());
     }
 
+    protected HbaseSessions createSessions(HugeConfig config) {
+        return new HbaseSessions(config, this.namespace, this.store);
+    }
+
     public String namespace() {
         return this.namespace;
     }
@@ -145,7 +149,7 @@ public abstract class HbaseStore extends AbstractBackendStore<HbaseSessions.Sess
         this.edgeLogicPartitions = config.get(HbaseOptions.HBASE_EDGE_PARTITION).shortValue();
 
         if (this.sessions == null) {
-            this.sessions = new HbaseSessions(config, this.namespace, this.store);
+            this.sessions = this.createSessions(config);
         }
 
         assert this.sessions != null;
