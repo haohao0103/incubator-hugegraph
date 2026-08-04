@@ -33,10 +33,24 @@ public class ObkvSerializer extends BinarySerializer {
 
     public ObkvSerializer(HugeConfig config) {
         super(false, true, config.get(ObkvOptions.ENABLE_PARTITION));
-        this.vertexPartitions = config.get(ObkvOptions.VERTEX_PARTITIONS).shortValue();
-        this.edgePartitions = config.get(ObkvOptions.EDGE_PARTITIONS).shortValue();
+        this.vertexPartitions = partitionCount(config,
+                                               ObkvOptions.VERTEX_PARTITIONS);
+        this.edgePartitions = partitionCount(config,
+                                             ObkvOptions.EDGE_PARTITIONS);
         LOG.debug("OBKV vertex partitions: {}, edge partitions: {}",
                   this.vertexPartitions, this.edgePartitions);
+    }
+
+    private static short partitionCount(HugeConfig config,
+                                        org.apache.hugegraph.config.ConfigOption<Integer> option) {
+        Object value = config.getProperty(option.name());
+        if (value == null) {
+            value = option.defaultValue();
+        }
+        if (value instanceof Number) {
+            return ((Number) value).shortValue();
+        }
+        return Short.parseShort(String.valueOf(value));
     }
 
     @Override

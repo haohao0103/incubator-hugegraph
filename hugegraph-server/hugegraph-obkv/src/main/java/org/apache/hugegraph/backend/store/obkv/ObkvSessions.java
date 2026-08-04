@@ -16,9 +16,14 @@
 
 package org.apache.hugegraph.backend.store.obkv;
 
+import java.io.IOException;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
 import java.util.Map;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.client.Connection;
+import org.apache.hadoop.hbase.security.User;
 import org.apache.hugegraph.backend.store.hbase.HbaseSessions;
 import org.apache.hugegraph.config.HugeConfig;
 
@@ -41,6 +46,29 @@ public class ObkvSessions extends HbaseSessions {
     @Override
     protected String connectionImplementation() {
         return OH_CONNECTION_IMPL;
+    }
+
+    @Override
+    protected Connection createConnection(Configuration configuration)
+                                          throws IOException {
+        try {
+            Constructor<?> constructor = Class.forName(OH_CONNECTION_IMPL)
+                    .getDeclaredConstructor(Configuration.class,
+                                           java.util.concurrent.ExecutorService.class,
+                                           User.class);
+            constructor.setAccessible(true);
+            return (Connection) constructor.newInstance(
+                    configuration, null, User.getCurrent());
+        } catch (InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof IOException) {
+                throw (IOException) cause;
+            }
+            throw new IOException("Failed to create OBKV connection", cause);
+        } catch (ReflectiveOperationException e) {
+            throw new IOException("OBKV connection constructor is incompatible",
+                                  e);
+        }
     }
 
     @Override

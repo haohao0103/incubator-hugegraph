@@ -114,6 +114,17 @@ public class HbaseSessions extends BackendSessionPool {
         // Default HBase configuration is assembled in open().
     }
 
+    /**
+     * Creates the underlying Connection. Subclasses backed by a third-party
+     * client (for example OBKV-HBase) may override this when the client class
+     * does not expose the constructor signature that HBase's ConnectionFactory
+     * reflectively requires.
+     */
+    protected Connection createConnection(Configuration configuration)
+                                          throws IOException {
+        return ConnectionFactory.createConnection(configuration);
+    }
+
     protected Connection hbase() {
         E.checkState(this.hbase != null, "HBase connection is not opened");
         return this.hbase;
@@ -174,7 +185,7 @@ public class HbaseSessions extends BackendSessionPool {
             UserGroupInformation.setConfiguration(hConfig);
             UserGroupInformation.loginUserFromKeytab(principal, keyTab);
         }
-        this.hbase = ConnectionFactory.createConnection(hConfig);
+        this.hbase = this.createConnection(hConfig);
     }
 
     @Override

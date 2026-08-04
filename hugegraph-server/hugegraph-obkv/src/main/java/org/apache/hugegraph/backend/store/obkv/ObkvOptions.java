@@ -26,15 +26,15 @@ public final class ObkvOptions extends OptionHolder {
     public static final ConfigOption<String> PARAM_URL = new ConfigOption<>(
             "obkv.param_url", "OceanBase ConfigServer URL", null, "");
     public static final ConfigOption<String> FULL_USER_NAME = new ConfigOption<>(
-            "obkv.full_user_name", "OceanBase full user name", disallowEmpty(), null);
+            "obkv.full_user_name", "OceanBase full user name", "");
     public static final ConfigOption<String> PASSWORD = new ConfigOption<>(
             "obkv.password", "OceanBase user password", null, "");
     public static final ConfigOption<String> SYS_USER_NAME = new ConfigOption<>(
-            "obkv.sys_user_name", "OceanBase sys user name", disallowEmpty(), null);
+            "obkv.sys_user_name", "OceanBase sys user name", "");
     public static final ConfigOption<String> SYS_PASSWORD = new ConfigOption<>(
             "obkv.sys_password", "OceanBase sys user password", null, "");
     public static final ConfigOption<String> DATABASE = new ConfigOption<>(
-            "obkv.database", "OceanBase database", disallowEmpty(), null);
+            "obkv.database", "OceanBase database", "");
     public static final ConfigOption<Integer> OPERATION_TIMEOUT = new ConfigOption<>(
             "obkv.operation_timeout", "OBKV operation timeout in milliseconds",
             positiveInt(), 30000);
