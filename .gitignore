@@ -90,6 +90,11 @@ hs_err_pid*
 # docker volumes ignore
 hugegraph-server/hugegraph-dist/docker/data/
 
+# test generated data
+**/rocksdb-data/
+**/rocksdb-index*/
+hugegraph-store/hg-store-test/tmp/
+
 # AI-IDE prompt files (We only keep AGENTS.md, other files could soft-linked it when needed)
 # Serena MCP memories
 .serena/*

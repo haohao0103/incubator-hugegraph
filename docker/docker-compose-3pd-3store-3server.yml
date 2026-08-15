@@ -96,6 +96,7 @@ services:
       HG_PD_INITIAL_STORE_LIST: store0:8500,store1:8500,store2:8500
       HG_PD_DATA_PATH: /hugegraph-pd/pd_data
       HG_PD_INITIAL_STORE_COUNT: 3
+      HG_PD_DEFAULT_SHARD_COUNT: 3
     ports: ["8620:8620", "8686:8686"]
     volumes:
       - hg-pd0-data:/hugegraph-pd/pd_data
@@ -114,6 +115,7 @@ services:
       HG_PD_INITIAL_STORE_LIST: store0:8500,store1:8500,store2:8500
       HG_PD_DATA_PATH: /hugegraph-pd/pd_data
       HG_PD_INITIAL_STORE_COUNT: 3
+      HG_PD_DEFAULT_SHARD_COUNT: 3
     ports: ["8621:8620", "8687:8686"]
     volumes:
       - hg-pd1-data:/hugegraph-pd/pd_data
@@ -132,6 +134,7 @@ services:
       HG_PD_INITIAL_STORE_LIST: store0:8500,store1:8500,store2:8500
       HG_PD_DATA_PATH: /hugegraph-pd/pd_data
       HG_PD_INITIAL_STORE_COUNT: 3
+      HG_PD_DEFAULT_SHARD_COUNT: 3
     ports: ["8622:8620", "8688:8686"]
     volumes:
       - hg-pd2-data:/hugegraph-pd/pd_data

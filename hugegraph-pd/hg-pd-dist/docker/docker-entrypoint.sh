@@ -56,6 +56,9 @@ require_env "HG_PD_INITIAL_STORE_LIST"
 : "${HG_PD_REST_PORT:=8620}"
 : "${HG_PD_DATA_PATH:=/hugegraph-pd/pd_data}"
 : "${HG_PD_INITIAL_STORE_COUNT:=1}"
+# TOPO-1 fix (2026-08-07): expose the raft replica count so it can never silently
+# drift to the image-baked default again. Default 3 = real 3-peer raft groups.
+: "${HG_PD_DEFAULT_SHARD_COUNT:=3}"
 
 SPRING_APPLICATION_JSON="$(cat <<JSON
 {
@@ -66,7 +69,8 @@ SPRING_APPLICATION_JSON="$(cat <<JSON
               "peers-list": "$(json_escape "${HG_PD_RAFT_PEERS_LIST}")" },
   "pd":     { "data-path":          "$(json_escape "${HG_PD_DATA_PATH}")",
               "initial-store-list": "$(json_escape "${HG_PD_INITIAL_STORE_LIST}")" ,
-              "initial-store-count": ${HG_PD_INITIAL_STORE_COUNT} }
+              "initial-store-count": ${HG_PD_INITIAL_STORE_COUNT} },
+  "partition": { "default-shard-count": ${HG_PD_DEFAULT_SHARD_COUNT} }
 }
 JSON
 )"
@@ -80,6 +84,7 @@ log "  raft.address=${HG_PD_RAFT_ADDRESS}"
 log "  raft.peers-list=${HG_PD_RAFT_PEERS_LIST}"
 log "  pd.initial-store-list=${HG_PD_INITIAL_STORE_LIST}"
 log "  pd.initial-store-count=${HG_PD_INITIAL_STORE_COUNT}"
+log "  partition.default-shard-count=${HG_PD_DEFAULT_SHARD_COUNT}"
 log "  pd.data-path=${HG_PD_DATA_PATH}"
 
 ./bin/start-hugegraph-pd.sh -j "${JAVA_OPTS:-}"
