@@ -46,6 +46,8 @@ import org.apache.hugegraph.store.grpc.common.Key;
 import org.apache.hugegraph.store.grpc.common.OpType;
 import org.apache.hugegraph.store.grpc.common.TableMethod;
 import org.apache.hugegraph.store.grpc.session.BatchEntry;
+import org.apache.hugegraph.store.grpc.session.TemporalQueryRes;
+import org.apache.hugegraph.store.grpc.session.TemporalQueryType;
 import org.apache.hugegraph.store.grpc.stream.HgStoreStreamGrpc.HgStoreStreamStub;
 import org.apache.hugegraph.store.grpc.stream.ScanStreamReq;
 import org.apache.hugegraph.store.query.StoreQueryParam;
@@ -256,6 +258,19 @@ class GrpcStoreNodeSessionImpl implements HgStoreNodeSession {
                 e -> true
 
         ).orElse(false);
+    }
+
+    @Override
+    public boolean temporalMutation(int code, byte[] bundle) {
+        return this.notifier.invoke(
+                () -> this.storeSessionClient.doTemporalMutation(this, code, bundle),
+                e -> true).orElse(false);
+    }
+
+    @Override
+    public TemporalQueryRes temporalQuery(byte[] factKey, TemporalQueryType type,
+                                          long from, long to) {
+        return this.storeSessionClient.doTemporalQuery(this, factKey, type, from, to);
     }
 
     @Override

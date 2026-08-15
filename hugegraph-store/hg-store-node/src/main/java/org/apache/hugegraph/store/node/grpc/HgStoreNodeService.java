@@ -38,6 +38,7 @@ import org.apache.hugegraph.store.options.RaftRocksdbOptions;
 import org.apache.hugegraph.store.raft.RaftClosure;
 import org.apache.hugegraph.store.raft.RaftOperation;
 import org.apache.hugegraph.store.raft.RaftTaskHandler;
+import org.apache.hugegraph.store.temporal.TemporalFeatureFlag;
 import org.apache.hugegraph.store.util.HgRaftError;
 import org.apache.hugegraph.store.util.HgStoreException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -226,6 +227,42 @@ public class HgStoreNodeService implements RaftTaskHandler {
                 return false; // Unhandled
         }
         return true;
+    }
+
+    /**
+     * Internal Server&lt;-&gt;Store temporal transport (design ruling §5.1).
+     *
+     * Not a public client API. Submits a temporal bundle as a Raft operation on
+     * the target partition: the bundle object is applied on the leader while
+     * the explicit codec bytes travel through the Raft log for followers and
+     * replay. The feature flag gates new submissions; replay of already
+     * committed logs is not affected by the flag.
+     */
+    public void addTemporalRaftTask(String graphName, Integer partitionId,
+                                     byte[] bundle, RaftClosure closure) {
+        if (!TemporalFeatureFlag.isEnabled()) {
+            closure.run(new Status(HgRaftError.CLUSTER_NOT_READY.getNumber(),
+                                   "temporal feature flag disabled: all Store " +
+                                   "nodes must be upgraded and capability " +
+                                   "handshake must succeed before temporal writes"));
+            return;
+        }
+        try {
+            byte[] values = new byte[bundle.length + 1];
+            values[0] = org.apache.hugegraph.store.temporal.TemporalMutationHandler
+                    .TEMPORAL_MUTATION;
+            System.arraycopy(bundle, 0, values, 1, bundle.length);
+            org.apache.hugegraph.store.temporal.TemporalMutationBundle decoded =
+                    org.apache.hugegraph.store.temporal.TemporalMutationBundleCodec.decode(bundle);
+            storeEngine.addRaftTask(graphName, partitionId,
+                                    RaftOperation.create(
+                                            org.apache.hugegraph.store.temporal.TemporalMutationHandler
+                                                    .TEMPORAL_MUTATION,
+                                            values, decoded), closure);
+        } catch (Exception e) {
+            closure.run(new Status(HgRaftError.UNKNOWN.getNumber(), e.getMessage()));
+            log.error("add temporal raft task", e);
+        }
     }
 
     @PreDestroy

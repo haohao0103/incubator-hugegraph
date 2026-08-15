@@ -45,6 +45,9 @@ import org.apache.hugegraph.store.HgKvEntry;
 import org.apache.hugegraph.store.HgKvIterator;
 import org.apache.hugegraph.store.HgKvOrderedIterator;
 import org.apache.hugegraph.store.HgOwnerKey;
+import org.apache.hugegraph.pd.common.PartitionUtils;
+import org.apache.hugegraph.store.grpc.session.TemporalQueryRes;
+import org.apache.hugegraph.store.grpc.session.TemporalQueryType;
 import org.apache.hugegraph.store.HgScanQuery;
 import org.apache.hugegraph.store.HgSessionConfig;
 import org.apache.hugegraph.store.HgStoreSession;
@@ -256,6 +259,26 @@ public class NodeTxSessionProxy implements HgStoreSession {
                             e -> this.getStoreNode(e.getNodeId()).openSession(this.graphName)
                                      .clean(partId)
                     ).findFirst().get();
+    }
+
+    @Override
+    public boolean temporalMutation(int code, byte[] bundle) {
+        Collection<HgNodePartition> nodes = this.doPartition("", code, code);
+        return nodes.stream()
+                    .map(e -> this.getStoreNode(e.getNodeId()).openSession(this.graphName)
+                                  .temporalMutation(code, bundle))
+                    .findFirst().orElse(false);
+    }
+
+    @Override
+    public TemporalQueryRes temporalQuery(byte[] factKey, TemporalQueryType type,
+                                          long from, long to) {
+        int code = PartitionUtils.calcHashcode(factKey);
+        Collection<HgNodePartition> nodes = this.doPartition("", code, code);
+        return nodes.stream()
+                    .map(e -> this.getStoreNode(e.getNodeId()).openSession(this.graphName)
+                                  .temporalQuery(factKey, type, from, to))
+                    .findFirst().orElse(null);
     }
 
     @Override

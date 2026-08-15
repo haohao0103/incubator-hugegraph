@@ -30,6 +30,11 @@ service HgStoreSession {
   rpc Table(TableReq) returns (FeedbackRes){};
   rpc Graph(GraphReq) returns (FeedbackRes){};
   rpc Clean(CleanReq) returns (FeedbackRes) {}
+  // Internal Server<->Store transport for temporal mutations. NOT a public
+  // client API; production temporal writes enter only through GraphTransaction.
+  rpc TemporalMutation(TemporalMutationReq) returns (FeedbackRes) {}
+  // Internal Server<->Store transport for fact-scoped temporal reads.
+  rpc TemporalQuery(TemporalQueryReq) returns (TemporalQueryRes) {}
 }
 
 message TableReq{
@@ -87,6 +92,42 @@ message CleanReq{
   int32 partition = 2;
 }
 
+message TemporalMutationReq {
+  Header header = 1;
+  // Fact-key hash used to resolve the owning partition (consistent with the
+  // get/put path, where the Store resolves the partition from the code).
+  int32 code = 2;
+  bytes bundle = 3;
+}
+
+enum TemporalQueryType {
+  TEMPORAL_QUERY_AS_OF = 0;
+  TEMPORAL_QUERY_BETWEEN = 1;
+  TEMPORAL_QUERY_OVERLAP = 2;
+}
+
+message TemporalQueryReq {
+  Header header = 1;
+  // Canonical fact key bytes: the read is fact-scoped; the Store derives the
+  // partition from calcHashcode(fact_key) and scans this exact prefix.
+  bytes fact_key = 2;
+  TemporalQueryType type = 3;
+  int64 from = 4;   // AS_OF time, or BETWEEN/OVERLAP lower bound.
+  int64 to = 5;     // BETWEEN/OVERLAP upper bound; unused for AS_OF.
+}
+
+message TemporalQueryRes {
+  ResStatus status = 1;
+  repeated TemporalInterval interval = 2;
+}
+
+message TemporalInterval {
+  bytes fact_key = 1;
+  int64 valid_from = 2;
+  bool open = 3;          // true when still valid (valid_to is absent).
+  int64 valid_to = 4;     // meaningful only when open == false.
+  int64 committed_revision = 5;
+}
 
 message FeedbackRes {
   ResStatus status = 1;

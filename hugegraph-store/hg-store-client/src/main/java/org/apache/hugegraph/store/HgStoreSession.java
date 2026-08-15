@@ -18,6 +18,8 @@
 package org.apache.hugegraph.store;
 
 import org.apache.hugegraph.store.client.type.HgStoreClientException;
+import org.apache.hugegraph.store.grpc.session.TemporalQueryRes;
+import org.apache.hugegraph.store.grpc.session.TemporalQueryType;
 
 public interface HgStoreSession extends HgKvStore {
 
@@ -36,4 +38,32 @@ public interface HgStoreSession extends HgKvStore {
     void rollback();
 
     boolean isTx();
+
+    /**
+     * Submit one temporal mutation bundle to the Store over the internal
+     * {@code temporalMutation} RPC. {@code code} is the fact-key hash used to
+     * resolve the owning partition. The transport (partition resolution and
+     * gRPC routing) is wired in the concrete gRPC session; the default keeps
+     * other session implementations honest by failing explicitly instead of
+     * silently dropping the mutation.
+     *
+     * @return true when the Store accepted the mutation
+     */
+    default boolean temporalMutation(int code, byte[] bundle) {
+        throw new UnsupportedOperationException(
+                "temporalMutation transport is not wired for " +
+                getClass().getName());
+    }
+
+    /**
+     * Fact-scoped temporal read. The fact-key bytes are the scan prefix; the
+     * Store derives the owning partition from calcHashcode(fact_key). The
+     * default keeps other session implementations honest by failing explicitly.
+     */
+    default TemporalQueryRes temporalQuery(byte[] factKey, TemporalQueryType type,
+                                           long from, long to) {
+        throw new UnsupportedOperationException(
+                "temporalQuery transport is not wired for " +
+                getClass().getName());
+    }
 }

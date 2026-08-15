@@ -41,7 +41,15 @@ import org.apache.hugegraph.store.grpc.session.GraphReq;
 import org.apache.hugegraph.store.grpc.session.HgStoreSessionGrpc;
 import org.apache.hugegraph.store.grpc.session.KeyValueResponse;
 import org.apache.hugegraph.store.grpc.session.TableReq;
+import org.apache.hugegraph.store.grpc.session.TemporalInterval;
+import org.apache.hugegraph.store.grpc.session.TemporalMutationReq;
+import org.apache.hugegraph.store.grpc.session.TemporalQueryReq;
+import org.apache.hugegraph.store.grpc.session.TemporalQueryRes;
+import org.apache.hugegraph.store.grpc.session.TemporalQueryType;
 import org.apache.hugegraph.store.grpc.session.ValueResponse;
+import org.apache.hugegraph.store.temporal.TemporalFeatureFlag;
+import org.apache.hugegraph.store.temporal.TemporalIntervalRow;
+import org.apache.hugegraph.store.temporal.TemporalQueryHandler;
 import org.apache.hugegraph.store.meta.Graph;
 import org.apache.hugegraph.store.meta.GraphManager;
 import org.apache.hugegraph.store.node.AppConfig;
@@ -68,6 +76,7 @@ public class HgStoreSessionImpl extends HgStoreSessionGrpc.HgStoreSessionImplBas
     private HgStoreNodeService storeService;
     private HgStoreWrapperEx wrapper;
     private PdProvider pdProvider;
+    private TemporalQueryHandler temporalQueryHandler;
 
     private HgStoreWrapperEx getWrapper() {
         if (this.wrapper == null) {
@@ -90,6 +99,102 @@ public class HgStoreSessionImpl extends HgStoreSessionGrpc.HgStoreSessionImplBas
             }
         }
         return pdProvider;
+    }
+
+    private TemporalQueryHandler getTemporalQueryHandler() {
+        if (this.temporalQueryHandler == null) {
+            synchronized (this) {
+                if (this.temporalQueryHandler == null) {
+                    this.temporalQueryHandler = new TemporalQueryHandler(
+                            storeService.getStoreEngine().getBusinessHandler());
+                }
+            }
+        }
+        return this.temporalQueryHandler;
+    }
+
+    /**
+     * Internal Server&lt;-&gt;Store transport for temporal mutations.
+     *
+     * This is not a public client API: production temporal writes enter only
+     * through GraphTransaction and reach Store over this same RPC. The request
+     * carries a full partition target so the store-side path is
+     * gRPC -&gt; Raft proposal -&gt; majority apply; it never bypasses PD routing
+     * or Raft. When the temporal feature flag is off, requests are rejected
+     * explicitly instead of being submitted.
+     */
+    @Override
+    public void temporalMutation(TemporalMutationReq request,
+                                 StreamObserver<FeedbackRes> responseObserver) {
+        if (!TemporalFeatureFlag.isEnabled()) {
+            FeedbackRes rejected = FeedbackRes.newBuilder()
+                    .setStatus(ResStatus.newBuilder()
+                            .setCode(ResCode.RES_CODE_EXCESS)
+                            .setMsg("temporal feature flag disabled: all Store " +
+                                    "nodes must be upgraded and capability " +
+                                    "handshake must succeed before temporal writes"))
+                    .build();
+            responseObserver.onNext(rejected);
+            responseObserver.onCompleted();
+            return;
+        }
+        BatchGrpcClosure<FeedbackRes> closure = new BatchGrpcClosure<>(1);
+        String graph = request.getHeader().getGraph();
+        // The request carries the fact-key hash (code); resolve the owning
+        // partition through PD exactly like the batch path, then submit the
+        // bundle as a Raft task on that partition.
+        int partition = getPD().getPartitionByCode(graph, request.getCode()).getId();
+        storeService.addTemporalRaftTask(graph, partition,
+                                         request.getBundle().toByteArray(),
+                                         closure.newRaftClosure());
+        closure.waitFinish(responseObserver, r -> closure.selectError(r),
+                           appConfig.getRaft().getRpcTimeOut());
+    }
+
+    /**
+     * Internal Server&lt;-&gt;Store transport for fact-scoped temporal reads.
+     *
+     * A read is a plain Store seek (not a Raft task): the query handler scans
+     * the history interval markers of exactly one fact key. The fact-key bytes
+     * are the scan prefix; the Store derives the owning partition from
+     * calcHashcode(fact_key), identical to the write path.
+     */
+    @Override
+    public void temporalQuery(TemporalQueryReq request,
+                              StreamObserver<TemporalQueryRes> responseObserver) {
+        String graph = request.getHeader().getGraph();
+        byte[] factKey = request.getFactKey().toByteArray();
+        TemporalQueryHandler handler = getTemporalQueryHandler();
+
+        List<TemporalIntervalRow> rows;
+        switch (request.getType()) {
+            case TEMPORAL_QUERY_AS_OF:
+                rows = handler.asOf(graph, factKey, request.getFrom());
+                break;
+            case TEMPORAL_QUERY_BETWEEN:
+                rows = handler.between(graph, factKey, request.getFrom(), request.getTo());
+                break;
+            case TEMPORAL_QUERY_OVERLAP:
+                rows = handler.overlap(graph, factKey, request.getFrom(), request.getTo());
+                break;
+            default:
+                rows = java.util.Collections.emptyList();
+                break;
+        }
+
+        TemporalQueryRes.Builder builder = TemporalQueryRes.newBuilder()
+                                                          .setStatus(HgGrpc.success());
+        for (TemporalIntervalRow row : rows) {
+            builder.addInterval(TemporalInterval.newBuilder()
+                    .setFactKey(ByteString.copyFrom(row.factKey()))
+                    .setValidFrom(row.validFrom())
+                    .setOpen(row.open())
+                    .setValidTo(row.open() ? 0L : row.validTo())
+                    .setCommittedRevision(row.committedRevision())
+                    .build());
+        }
+        responseObserver.onNext(builder.build());
+        responseObserver.onCompleted();
     }
 
     @Override

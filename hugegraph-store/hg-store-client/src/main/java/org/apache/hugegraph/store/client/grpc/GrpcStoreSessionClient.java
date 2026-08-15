@@ -39,6 +39,12 @@ import org.apache.hugegraph.store.grpc.session.GraphReq;
 import org.apache.hugegraph.store.grpc.session.HgStoreSessionGrpc;
 import org.apache.hugegraph.store.grpc.session.HgStoreSessionGrpc.HgStoreSessionBlockingStub;
 import org.apache.hugegraph.store.grpc.session.TableReq;
+import org.apache.hugegraph.store.grpc.session.TemporalMutationReq;
+import org.apache.hugegraph.store.grpc.session.TemporalQueryReq;
+import org.apache.hugegraph.store.grpc.session.TemporalQueryRes;
+import org.apache.hugegraph.store.grpc.session.TemporalQueryType;
+
+import com.google.protobuf.ByteString;
 
 import io.grpc.ManagedChannel;
 import lombok.extern.slf4j.Slf4j;
@@ -123,5 +129,25 @@ class GrpcStoreSessionClient extends AbstractGrpcClient {
                                   .setMethod(method)
                                   .build()
                    );
+    }
+    FeedbackRes doTemporalMutation(HgStoreNodeSession nodeSession, int code, byte[] bundle) {
+        return this.getBlockingStub(nodeSession)
+                   .temporalMutation(TemporalMutationReq.newBuilder()
+                           .setHeader(getHeader(nodeSession))
+                           .setCode(code)
+                           .setBundle(ByteString.copyFrom(bundle))
+                           .build());
+    }
+
+    TemporalQueryRes doTemporalQuery(HgStoreNodeSession nodeSession, byte[] factKey,
+                                     TemporalQueryType type, long from, long to) {
+        return this.getBlockingStub(nodeSession)
+                   .temporalQuery(TemporalQueryReq.newBuilder()
+                           .setHeader(getHeader(nodeSession))
+                           .setFactKey(ByteString.copyFrom(factKey))
+                           .setType(type)
+                           .setFrom(from)
+                           .setTo(to)
+                           .build());
     }
 }
