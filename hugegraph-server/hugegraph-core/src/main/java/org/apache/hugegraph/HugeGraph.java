@@ -389,4 +389,26 @@ public interface HugeGraph extends Graph {
 
         TraversalStrategies.GlobalCache.registerStrategies(clazz, strategies);
     }
+
+    /**
+     * Accumulate one interval-creating temporal mutation (APPEND/UPSERT) in the
+     * current transaction. The default fails explicitly; a temporal backend
+     * overrides it. The final idempotency/conflict decision stays on the Store.
+     */
+    default void temporalMutate(org.apache.hugegraph.temporal.store.TemporalWrite.Request request) {
+        throw new UnsupportedOperationException(
+                "temporal graphs are not supported by this backend");
+    }
+
+    /**
+     * Fact-scoped temporal read ({@code as_of} / {@code between} /
+     * {@code overlap}). The default fails explicitly; a temporal backend
+     * overrides it.
+     */
+    default List<org.apache.hugegraph.temporal.store.TemporalIntervalResult>
+    temporalQuery(org.apache.hugegraph.temporal.store.TemporalFactKey factKey,
+                  org.apache.hugegraph.temporal.TemporalQuery query) {
+        throw new UnsupportedOperationException(
+                "temporal graphs are not supported by this backend");
+    }
 }

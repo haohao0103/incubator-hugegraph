@@ -526,6 +526,23 @@ public class HstoreSessionsImpl extends HstoreSessions {
         }
 
         @Override
+        public void temporalMutate(int code, byte[] bundle) {
+            // The fact-key hash (code) is the same locator the Store uses to
+            // resolve the owning partition. The concrete gRPC transport inside
+            // HgStoreSession.temporalMutation resolves code -> partition and
+            // routes the bundle to its leader.
+            this.graph.temporalMutation(code, bundle);
+        }
+
+        @Override
+        public org.apache.hugegraph.store.grpc.session.TemporalQueryRes temporalQuery(
+                byte[] factKey,
+                org.apache.hugegraph.store.grpc.session.TemporalQueryType type,
+                long from, long to) {
+            return this.graph.temporalQuery(factKey, type, from, to);
+        }
+
+        @Override
         public synchronized void increase(String table, byte[] ownerKey,
                                           byte[] key, byte[] value) {
             prepare();

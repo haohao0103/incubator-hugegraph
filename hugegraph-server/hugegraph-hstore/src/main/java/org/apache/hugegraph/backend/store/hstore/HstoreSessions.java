@@ -29,6 +29,8 @@ import org.apache.hugegraph.backend.store.BackendSession.AbstractBackendSession;
 import org.apache.hugegraph.backend.store.BackendSessionPool;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.store.HgOwnerKey;
+import org.apache.hugegraph.store.grpc.session.TemporalQueryRes;
+import org.apache.hugegraph.store.grpc.session.TemporalQueryType;
 import org.apache.hugegraph.type.define.GraphMode;
 
 public abstract class HstoreSessions extends BackendSessionPool {
@@ -204,5 +206,21 @@ public abstract class HstoreSessions extends BackendSessionPool {
         public abstract void beginTx();
 
         public abstract int getActiveStoreSize();
+
+        /**
+         * Submit an encoded temporal mutation bundle to the Store. {@code code}
+         * is the fact-key hash; the concrete session resolves the owning
+         * partition and routes the bundle to its leader.
+         */
+        public abstract void temporalMutate(int code, byte[] bundle);
+
+        /**
+         * Fact-scoped temporal read. {@code factKey} is the canonical fact key
+         * bytes (the Store scan prefix); the concrete session routes to the
+         * owning partition and returns the raw interval rows.
+         */
+        public abstract TemporalQueryRes temporalQuery(byte[] factKey,
+                                                       TemporalQueryType type,
+                                                       long from, long to);
     }
 }

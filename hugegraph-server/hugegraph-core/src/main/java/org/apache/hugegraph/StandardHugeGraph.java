@@ -728,6 +728,18 @@ public class StandardHugeGraph implements HugeGraph {
     }
 
     @Override
+    public void temporalMutate(org.apache.hugegraph.temporal.store.TemporalWrite.Request request) {
+        this.graphTransaction().temporalMutate(request);
+    }
+
+    @Override
+    public java.util.List<org.apache.hugegraph.temporal.store.TemporalIntervalResult>
+    temporalQuery(org.apache.hugegraph.temporal.store.TemporalFactKey factKey,
+                  org.apache.hugegraph.temporal.TemporalQuery query) {
+        return this.graphTransaction().temporalQuery(factKey, query);
+    }
+
+    @Override
     public void removeVertex(Vertex vertex) {
         this.graphTransaction().removeVertex((HugeVertex) vertex);
     }

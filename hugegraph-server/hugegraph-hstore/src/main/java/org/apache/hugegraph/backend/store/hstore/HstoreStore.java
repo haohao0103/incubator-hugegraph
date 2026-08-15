@@ -55,11 +55,17 @@ import org.apache.hugegraph.backend.store.BackendFeatures;
 import org.apache.hugegraph.backend.store.BackendMutation;
 import org.apache.hugegraph.backend.store.BackendStoreProvider;
 import org.apache.hugegraph.backend.store.BackendTable;
+import org.apache.hugegraph.backend.store.TemporalBackendStore;
 import org.apache.hugegraph.backend.store.hstore.HstoreSessions.Session;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.iterator.CIter;
+import org.apache.hugegraph.pd.common.PartitionUtils;
 import org.apache.hugegraph.schema.EdgeLabel;
+import org.apache.hugegraph.store.temporal.TemporalMutationBundle;
+import org.apache.hugegraph.store.temporal.TemporalMutationBundleCodec;
+import org.apache.hugegraph.temporal.store.TemporalRowKeyCodec;
+import org.apache.hugegraph.temporal.store.TemporalWrite;
 import org.apache.hugegraph.type.HugeTableType;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Action;
@@ -71,7 +77,8 @@ import org.slf4j.Logger;
 
 import com.google.common.collect.ImmutableSet;
 
-public abstract class HstoreStore extends AbstractBackendStore<Session> {
+public abstract class HstoreStore extends AbstractBackendStore<Session>
+                                implements TemporalBackendStore {
 
     private static final Logger LOG = Log.logger(HstoreStore.class);
 
@@ -682,6 +689,83 @@ public abstract class HstoreStore extends AbstractBackendStore<Session> {
     @Override
     public void beginTx() {
         this.sessions.session().beginTx();
+    }
+
+    /**
+     * Temporal capability: assemble the four-view bundle for an interval-
+     * creating mutation (APPEND/UPSERT), encode it and submit it to the Store
+     * over the temporalMutation RPC. The fact-key hash is the same locator the
+     * Store uses to resolve the owning partition. CLOSE/DELETE are handled by
+     * the close/delete state machine (design ruling §3.2), not here.
+     */
+    @Override
+    public void temporalMutate(TemporalWrite.Request request) {
+        this.checkOpened();
+        // The bundle's graph must be the Store's actual graph name (e.g.
+        // "hugegraph/g"), not the Server-level graph name that the REST layer
+        // passes. Rebuild the request with the session's graph name so the
+        // row-key prefix and the Store's business handler resolve the same
+        // graph as the routing path.
+        String graphName = this.sessions.session().getGraphName();
+        TemporalWrite.Request storeRequest = new TemporalWrite.Request(
+                request.operation(), graphName, request.temporalLabel(),
+                request.entityId(), request.factKey(), request.validFrom(),
+                request.validTo(), request.payload(), request.mutationId(),
+                request.schemaVersion());
+        TemporalMutationBundle bundle =
+                TemporalMutationBundleFactory.build(storeRequest, new TemporalRowKeyCodec());
+        byte[] encoded;
+        try {
+            encoded = TemporalMutationBundleCodec.encode(bundle);
+        } catch (java.io.IOException e) {
+            throw new org.apache.hugegraph.backend.BackendException(
+                    "Failed to encode temporal mutation bundle", e);
+        }
+        int code = PartitionUtils.calcHashcode(bundle.factKey());
+        this.sessions.session().temporalMutate(code, encoded);
+    }
+
+    @Override
+    public java.util.List<org.apache.hugegraph.temporal.store.TemporalIntervalResult>
+    temporalQuery(org.apache.hugegraph.temporal.store.TemporalFactKey factKey,
+                  org.apache.hugegraph.temporal.TemporalQuery query) {
+        this.checkOpened();
+        org.apache.hugegraph.store.grpc.session.TemporalQueryType type = toProtoType(query);
+        long to = query.to() == null ? 0L : query.to();
+        org.apache.hugegraph.store.grpc.session.TemporalQueryRes res =
+                this.sessions.session().temporalQuery(factKey.canonicalBytes(),
+                                                      type, query.from(), to);
+        java.util.List<org.apache.hugegraph.temporal.store.TemporalIntervalResult> rows =
+                new java.util.ArrayList<>();
+        if (res != null) {
+            for (org.apache.hugegraph.store.grpc.session.TemporalInterval interval :
+                    res.getIntervalList()) {
+                rows.add(new org.apache.hugegraph.temporal.store.TemporalIntervalResult(
+                        interval.getFactKey().toByteArray(),
+                        interval.getValidFrom(),
+                        interval.getOpen() ? null : interval.getValidTo(),
+                        interval.getCommittedRevision()));
+            }
+        }
+        return rows;
+    }
+
+    private static org.apache.hugegraph.store.grpc.session.TemporalQueryType toProtoType(
+            org.apache.hugegraph.temporal.TemporalQuery query) {
+        switch (query.type()) {
+            case AS_OF:
+                return org.apache.hugegraph.store.grpc.session.TemporalQueryType
+                        .TEMPORAL_QUERY_AS_OF;
+            case BETWEEN:
+                return org.apache.hugegraph.store.grpc.session.TemporalQueryType
+                        .TEMPORAL_QUERY_BETWEEN;
+            case OVERLAP:
+                return org.apache.hugegraph.store.grpc.session.TemporalQueryType
+                        .TEMPORAL_QUERY_OVERLAP;
+            default:
+                throw new IllegalArgumentException("unknown temporal query type: " +
+                                                   query.type());
+        }
     }
 
     @Override

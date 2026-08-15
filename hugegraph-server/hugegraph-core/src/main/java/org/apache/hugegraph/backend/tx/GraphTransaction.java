@@ -58,6 +58,11 @@ import org.apache.hugegraph.backend.query.QueryResults;
 import org.apache.hugegraph.backend.store.BackendEntry;
 import org.apache.hugegraph.backend.store.BackendMutation;
 import org.apache.hugegraph.backend.store.BackendStore;
+import org.apache.hugegraph.backend.store.TemporalBackendStore;
+import org.apache.hugegraph.temporal.TemporalQuery;
+import org.apache.hugegraph.temporal.store.TemporalFactKey;
+import org.apache.hugegraph.temporal.store.TemporalIntervalResult;
+import org.apache.hugegraph.temporal.store.TemporalWrite;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.config.HugeConfig;
 import org.apache.hugegraph.exception.LimitExceedException;
@@ -518,6 +523,40 @@ public class GraphTransaction extends IndexableTransaction {
             super.commit();
         } finally {
             this.locksTable.unlock();
+        }
+    }
+
+    /**
+     * Accumulate one interval-creating temporal mutation (APPEND/UPSERT). The
+     * final idempotency/conflict decision stays on the Store apply path; the
+     * transaction only validates the interval shape and dispatches on commit.
+     */
+    public void temporalMutate(TemporalWrite.Request request) {
+        E.checkNotNull(request, "request");
+        // Dispatch immediately: the temporal mutation is its own Raft proposal
+        // on the Store (the batch+temporal single-proposal merge is a later
+        // hardening item), so it is submitted through the temporal backend
+        // capability right away rather than accumulated into the ordinary
+        // commit. A non-capable store is rejected explicitly.
+        TemporalBackendStore.require(this.store()).temporalMutate(request);
+    }
+
+    /**
+     * Fact-scoped temporal read ({@code as_of} / {@code between} /
+     * {@code overlap}). The fact key identifies the fact sequence; the returned
+     * intervals carry the valid-time window and committed revision. Requires a
+     * temporal-capable backend.
+     */
+    public List<TemporalIntervalResult> temporalQuery(TemporalFactKey factKey,
+                                                      TemporalQuery query) {
+        E.checkNotNull(factKey, "factKey");
+        E.checkNotNull(query, "query");
+        this.beforeRead();
+        try {
+            return TemporalBackendStore.require(this.store())
+                                        .temporalQuery(factKey, query);
+        } finally {
+            this.afterRead();
         }
     }
 
