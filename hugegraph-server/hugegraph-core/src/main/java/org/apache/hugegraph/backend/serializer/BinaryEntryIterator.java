@@ -4,7 +4,7 @@
  * this work for additional information regarding copyright ownership.
  * The ASF licenses this file to You under the Apache License, Version 2.0
  * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
+ * the License. You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
@@ -18,6 +18,7 @@
 package org.apache.hugegraph.backend.serializer;
 
 import java.lang.ref.Cleaner;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiFunction;
 
 import org.apache.hugegraph.backend.page.PageState;
@@ -47,6 +48,15 @@ public class BinaryEntryIterator<Elem> extends BackendEntryIterator {
      * Only holds the backend iterator that needs closing.
      */
     private static final class CleaningState implements Runnable {
+
+        // The safety net releases the resource eagerly on GC. Logging a WARN on
+        // every occurrence floods the log and slows I/O, so only emit WARN every
+        // N occurrences (DEBUG otherwise). The eager close() paths (limit /
+        // exhaustion) should make this fire only for genuinely abandoned
+        // iterators.
+        private static final AtomicLong CLEANED_COUNT = new AtomicLong();
+        private static final long WARN_EVERY = 100L;
+
         private final BackendIterator<?> results;
 
         CleaningState(BackendIterator<?> results) {
@@ -58,9 +68,16 @@ public class BinaryEntryIterator<Elem> extends BackendEntryIterator {
             if (this.results != null) {
                 try {
                     this.results.close();
-                    LOG.warn("BinaryEntryIterator cleaned without explicit close. " +
-                             "This indicates a resource leak path was triggered, " +
-                             "likely due to an interrupted/timeout query.");
+                    long count = CLEANED_COUNT.incrementAndGet();
+                    if (count % WARN_EVERY == 0L) {
+                        LOG.warn("BinaryEntryIterator cleaned without explicit " +
+                                 "close ({} occurrences total). This indicates a " +
+                                 "resource leak path was triggered, likely due to " +
+                                 "an interrupted/timeout query.", count);
+                    } else {
+                        LOG.debug("BinaryEntryIterator cleaned without explicit " +
+                                  "close (occurrence {}).", count);
+                    }
                 } catch (Exception ignored) {
                     // Cleaner action must not throw
                 }
@@ -74,6 +91,7 @@ public class BinaryEntryIterator<Elem> extends BackendEntryIterator {
     protected BackendEntry next;
 
     private final Cleaner.Cleanable cleanable;
+    private volatile boolean closed;
 
     public BinaryEntryIterator(BackendIterator<Elem> results, Query query,
                                BiFunction<BackendEntry, Elem, BackendEntry> m) {
@@ -85,6 +103,7 @@ public class BinaryEntryIterator<Elem> extends BackendEntryIterator {
         this.results = results;
         this.merger = m;
         this.next = null;
+        this.closed = false;
 
         // Register with Cleaner so resources are released even if close() is
         // never called (e.g. client disconnect mid-stream).
@@ -101,6 +120,15 @@ public class BinaryEntryIterator<Elem> extends BackendEntryIterator {
 
     @Override
     public void close() throws Exception {
+        this.doClose();
+    }
+
+    /** Idempotent release of the Cleaner reference and the backend iterator. */
+    private void doClose() {
+        if (this.closed) {
+            return;
+        }
+        this.closed = true;
         // cleanable.clean() is idempotent and releases the Cleaner's reference,
         // so the cleaning action won't run again on GC.
         this.cleanable.clean();
@@ -115,13 +143,18 @@ public class BinaryEntryIterator<Elem> extends BackendEntryIterator {
 
     @Override
     protected final boolean fetch() {
+        if (this.closed) {
+            return false;
+        }
         assert this.current == null;
         if (this.next != null) {
             this.current = this.next;
             this.next = null;
         }
 
+        boolean exhausted = true;
         while (this.results.hasNext()) {
+            exhausted = false;
             Elem elem = this.results.next();
             BackendEntry merged = this.merger.apply(this.current, elem);
             E.checkState(merged != null, "Error when merging entry");
@@ -145,11 +178,16 @@ public class BinaryEntryIterator<Elem> extends BackendEntryIterator {
             if (this.reachLimit(this.fetched() - 1)) {
                 // Need remove last one because fetched limit + 1 records
                 this.removeLastRecord();
-                this.results.close();
+                this.doClose();
                 break;
             }
         }
 
+        if (exhausted) {
+            // Backend fully consumed: release the underlying iterator eagerly
+            // instead of waiting for GC + the Cleaner safety net.
+            this.doClose();
+        }
         return this.current != null;
     }
 

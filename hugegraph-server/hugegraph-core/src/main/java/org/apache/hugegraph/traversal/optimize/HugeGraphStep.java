@@ -27,6 +27,7 @@ import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.backend.query.ConditionQuery;
 import org.apache.hugegraph.backend.query.Query;
 import org.apache.hugegraph.backend.query.QueryResults;
+import org.apache.hugegraph.iterator.WrappedIterator;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.util.Log;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.GraphStep;
@@ -62,6 +63,9 @@ public final class HugeGraphStep<S, E extends Element>
         boolean queryEdge = this.returnsEdge();
         assert queryVertex || queryEdge;
         this.setIteratorSupplier(() -> {
+            // Close the previous results before replacing them so the backend
+            // iterator is released eagerly instead of waiting for GC + Cleaner.
+            WrappedIterator.close(this.lastTimeResults);
             Iterator<E> results = queryVertex ? this.vertices() : this.edges();
             this.lastTimeResults = results;
             return results;

@@ -26,15 +26,20 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.hugegraph.backend.page.PageState;
 import org.apache.hugegraph.backend.query.Query;
 import org.apache.hugegraph.backend.serializer.BinaryEntryIterator;
+import org.apache.hugegraph.backend.store.BackendEntry;
 import org.apache.hugegraph.backend.store.BackendEntry.BackendIterator;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.unit.BaseUnitTest;
 import org.junit.Test;
 
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
 /**
  * Tests for BinaryEntryIterator resource cleanup behavior,
- * verifying the finalize() GC safety net for the close chain.
+ * verifying the close chain and the eager close on exhaustion
+ * (the Cleaner is a last-resort safety net for abandoned iterators).
  */
 public class BinaryEntryIteratorTest extends BaseUnitTest {
 
@@ -117,48 +122,31 @@ public class BinaryEntryIteratorTest extends BaseUnitTest {
     }
 
     @Test
-    public void testFinalizeClosesUnderlyingIterator() throws Exception {
+    public void testExhaustionClosesUnderlyingIterator() throws Exception {
         TrackingIterator tracker = new TrackingIterator(
-                new byte[]{1, 2, 3});
+                new byte[]{1}, new byte[]{2}, new byte[]{3});
         Query query = new Query(HugeType.VERTEX);
-
-        // Create an instance and let it become unreachable
-        // The finalize() method is tested by directly invoking it
         BinaryEntryIterator<byte[]> it = new BinaryEntryIterator<>(
-                tracker, query, (entry, elem) -> entry);
+                tracker, query, (entry, elem) -> mockEntry());
 
-        // Directly invoke finalize via reflection for reliable testing
-        java.lang.reflect.Method finalize = it.getClass()
-                .getDeclaredMethod("finalize");
-        finalize.setAccessible(true);
-        finalize.invoke(it);
+        // Fully consume the iterator; exhausting the backend must close the
+        // underlying iterator eagerly instead of waiting for GC + Cleaner.
+        int count = 0;
+        while (it.hasNext()) {
+            it.next();
+            count++;
+        }
 
+        Assert.assertEquals(3, count);
+        Assert.assertEquals(3, tracker.getNextCount());
         Assert.assertTrue(
-                "BinaryEntryIterator.finalize() must close the wrapped iterator",
+                "Exhausted BinaryEntryIterator must close the wrapped iterator",
                 tracker.isClosed());
     }
 
-    @Test
-    public void testGarbageCollectionTriggersFinalize() throws Exception {
-        TrackingIterator tracker = new TrackingIterator();
-        Query query = new Query(HugeType.VERTEX);
-        final AtomicInteger finalized = new AtomicInteger(0);
-
-        // Anonymous subclass to track finalize calls
-        BinaryEntryIterator<byte[]> it = new BinaryEntryIterator<byte[]>(
-                tracker, query, (entry, elem) -> entry) {
-            @Override
-            protected void finalize() throws Throwable {
-                finalized.incrementAndGet();
-                super.finalize();
-            }
-        };
-
-        // Check that finalize tracks the call count
-        Assert.assertEquals(0, finalized.get());
-
-        // Call close directly first to verify normal path
-        it.close();
-        Assert.assertTrue("Normal close path must work", tracker.isClosed());
+    private static BackendEntry mockEntry() {
+        BackendEntry entry = mock(BackendEntry.class);
+        when(entry.type()).thenReturn(HugeType.VERTEX);
+        return entry;
     }
 }

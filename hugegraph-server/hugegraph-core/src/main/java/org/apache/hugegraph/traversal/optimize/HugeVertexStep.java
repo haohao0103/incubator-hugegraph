@@ -29,6 +29,7 @@ import org.apache.hugegraph.backend.query.ConditionQuery;
 import org.apache.hugegraph.backend.query.Query;
 import org.apache.hugegraph.backend.query.QueryResults;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
+import org.apache.hugegraph.iterator.WrappedIterator;
 import org.apache.hugegraph.schema.EdgeLabel;
 import org.apache.hugegraph.type.define.Directions;
 import org.apache.hugegraph.util.Log;
@@ -69,6 +70,10 @@ public class HugeVertexStep<E extends Element>
         boolean queryVertex = this.returnsVertex();
         boolean queryEdge = this.returnsEdge();
         assert queryVertex || queryEdge;
+        // Close the previous per-traverser iterator before replacing it, so a
+        // vertex with many adjacent traversers doesn't leak one backend
+        // iterator per traverser.
+        WrappedIterator.close(this.iterator);
         if (queryVertex) {
             this.iterator = (Iterator<E>) this.vertices(traverser);
         } else {
