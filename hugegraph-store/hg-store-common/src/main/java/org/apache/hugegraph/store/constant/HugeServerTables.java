@@ -31,6 +31,11 @@ public class HugeServerTables {
     public static final String OLAP_TABLE = "g+olap";
     //FIXME Is this necessary?
     public static final String SERVER_TABLE = "g+server";
+    // Temporal tables are Store-internal and intentionally outside the ordinary table mapping.
+    public static final String TEMPORAL_HISTORY_TABLE = "g+temporal_history";
+    public static final String TEMPORAL_CURRENT_TABLE = "g+temporal_current";
+    public static final String TEMPORAL_OPEN_INDEX_TABLE = "g+temporal_open_index";
+    public static final String TEMPORAL_INDEX_TABLE = "g+temporal_index";
 
     public static final String[] TABLES = new String[]{UNKNOWN_TABLE, VERTEX_TABLE,
             OUT_EDGE_TABLE, IN_EDGE_TABLE,

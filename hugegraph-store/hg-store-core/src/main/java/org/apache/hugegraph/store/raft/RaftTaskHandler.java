@@ -29,4 +29,22 @@ public interface RaftTaskHandler {
 
     boolean invoke(final int groupId, final byte methodId, final Object req,
                    RaftClosure response) throws HgStoreException;
+
+    /**
+     * Apply a task with the exact committed Raft log index. Existing handlers
+     * keep the legacy entry point; temporal handlers override this overload so
+     * persisted views can carry the real apply revision.
+     */
+    default boolean invoke(final int groupId, final byte[] request,
+                           final RaftClosure response, final long applyIndex)
+            throws HgStoreException {
+        return invoke(groupId, request, response);
+    }
+
+    /** Apply an already decoded task with the exact committed Raft log index. */
+    default boolean invoke(final int groupId, final byte methodId, final Object req,
+                           final RaftClosure response, final long applyIndex)
+            throws HgStoreException {
+        return invoke(groupId, methodId, req, response);
+    }
 }

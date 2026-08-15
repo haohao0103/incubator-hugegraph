@@ -32,6 +32,17 @@ public enum HgRaftError {
 
     TASK_CONTINUE(21000, "Task is continue"),
     TASK_ERROR(21001, "Task is error, need to retry"),
+
+    // Temporal apply-time business rejections (Slice 1 L1b fix). These are NOT
+    // partition faults: they represent a legitimate, deterministic rejection of
+    // a temporal mutation (interval conflict / unsupported wire version) decided
+    // identically on every replica by the state machine. Carrying a dedicated
+    // code keeps them out of the getErrorResponse() default branch
+    // ("Unmatchable errorStatus") and lets the client distinguish a lost
+    // conflict race from a genuine unknown failure.
+    TEMPORAL_CONFLICT(22000, "temporal fact interval conflict"),
+    TEMPORAL_UNSUPPORTED_VERSION(22001, "temporal unsupported wire version"),
+    TEMPORAL_CLOSED_INTERVAL_CONFLICT(22002, "temporal closed interval conflict"),
     END(30000, "HgStore error is end");
 
     private static final Map<Integer, HgRaftError> RAFT_ERROR_MAP = new HashMap<>();

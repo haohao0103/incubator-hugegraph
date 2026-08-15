@@ -38,6 +38,10 @@ public class HgStoreException extends RuntimeException {
     public static final int EC_RKDB_IMPORT_SNAPSHOT_FAIL = 1215;
     public static final int EC_RKDB_TRANSFER_SNAPSHOT_FAIL = 1216;
     public static final int EC_METRIC_FAIL = 1401;
+    public static final int EC_TEMPORAL_CONFLICT = 1501;
+    public static final int EC_TEMPORAL_UNSUPPORTED_VERSION = 1502;
+    public static final int EC_TEMPORAL_QUERY_LIMIT_EXCEEDED = 1503;
+    public static final int EC_TEMPORAL_CLOSED_INTERVAL_CONFLICT = 1504;
     private static final long serialVersionUID = 5193624480997934335L;
     private final int code;
 

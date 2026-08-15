@@ -17,7 +17,6 @@
 
 package org.apache.hugegraph.store.raft;
 
-import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
@@ -26,6 +25,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.hugegraph.store.HgStoreEngine;
 import org.apache.hugegraph.store.snapshot.SnapshotHandler;
+import org.apache.hugegraph.store.util.HgRaftError;
 import org.apache.hugegraph.store.util.HgStoreException;
 
 import com.alipay.sofa.jraft.Closure;
@@ -56,6 +56,10 @@ public class PartitionStateMachine extends StateMachineAdapter {
     private final List<RaftStateListener> stateListeners;
 
     private final Lock lock = new ReentrantLock();
+    // JRaft normally invokes onApply serially, but the Store entry point must
+    // make this invariant explicit: a temporal read/decision/write bundle may
+    // not overlap another apply on the same partition.
+    private final Lock applyLock = new ReentrantLock();
     private long committedIndex;
 
     public PartitionStateMachine(Integer groupId, SnapshotHandler snapshotHandler) {
@@ -79,31 +83,88 @@ public class PartitionStateMachine extends StateMachineAdapter {
 
     @Override
     public void onApply(Iterator iter) {
-        while (iter.hasNext()) {
-            final DefaultRaftClosure done = (DefaultRaftClosure) iter.done();
-            try {
+        log.info("temporal apply-loop stateMachineId={} groupId={} thread={} index={}",
+                 System.identityHashCode(this), groupId, Thread.currentThread().getName(),
+                 iter.getIndex());
+        applyLock.lock();
+        try {
+            while (iter.hasNext()) {
+                final DefaultRaftClosure done = (DefaultRaftClosure) iter.done();
+                // Instrumentation (Slice 1 condition 3): emit the raft-state fields
+                // per applied entry so the verifier can join term / isLeader onto the
+                // temporal apply-entry line by (groupId, index). term/isLeader are the
+                // discriminating fields for the leader-switch variant: they tell whether
+                // a decision was applied on the old or new leader.
+                log.info("raft apply context groupId={} index={} term={} isLeader={} " +
+                         "stateMachineId={}", groupId, iter.getIndex(), iter.getTerm(),
+                         isLeader(), System.identityHashCode(this));
+                try {
+                boolean handled = false;
                 for (RaftTaskHandler handler : taskHandlers) {
                     if (done != null) {
                         // Leader branch, call locally
                         RaftOperation operation = done.getOperation();
                         if (handler.invoke(groupId, operation.getOp(), operation.getReq(),
-                                           done.getClosure())) {
+                                           done.getClosure(), iter.getIndex())) {
+                            handled = true;
                             done.run(Status.OK());
                             break;
                         }
                     } else {
-                        if (handler.invoke(groupId, iter.getData().array(), null)) {
+                        if (handler.invoke(groupId, iter.getData().array(), null,
+                                           iter.getIndex())) {
+                            handled = true;
                             break;
                         }
                     }
                 }
+                if (!handled) {
+                    // Wire protocol ruling §5.1: unknown/unhandled op must fail
+                    // explicitly instead of being silently skipped. The catch
+                    // below records it and the caller observes a failure/timeout.
+                    throw new HgStoreException(
+                            HgStoreException.EC_TEMPORAL_UNSUPPORTED_VERSION,
+                            "no handler for raft op, explicit fail instead of " +
+                            "silent skip");
+                }
             } catch (Throwable t) {
-                log.info("{}", Base64.getEncoder().encode(iter.getData().array()));
-                log.error(String.format("StateMachine %s meet critical error:", groupId), t);
-                if (done != null) {
-                    log.error("StateMachine meet critical error: op = {} {}.",
-                              done.getOperation().getOp(),
-                              done.getOperation().getReq());
+                // A temporal apply can deterministically REJECT a mutation
+                // (interval conflict) or refuse an unsupported wire version.
+                // These are EXPECTED business outcomes, decided identically on
+                // every replica -- they are NOT StateMachine critical errors and
+                // must not be logged as such (Slice 1 replay condition 2: zero
+                // critical errors on conflict rounds), nor may the raft entry
+                // payload be dumped at INFO (L1a). Classify them and surface a
+                // specific raft code (L1b) so the client sees a clean rejection
+                // instead of UNKNOWN tripping the getErrorResponse() default.
+                RaftClosure closure = (done != null) ? done.getClosure() : null;
+                if (t instanceof HgStoreException &&
+                    isTemporalBusinessRejection(((HgStoreException) t).getCode())) {
+                    HgStoreException e = (HgStoreException) t;
+                    log.warn("temporal apply rejected groupId={} index={} code={} msg={}",
+                             groupId, iter.getIndex(), e.getCode(), e.getMessage());
+                    if (closure != null) {
+                        closure.run(new Status(temporalRaftError(e.getCode()).getNumber(),
+                                               e.getMessage() + " code=" + e.getCode()));
+                    }
+                } else {
+                    log.error(String.format("StateMachine %s meet critical error:", groupId), t);
+                    if (done != null) {
+                        log.error("StateMachine meet critical error: op = {} {}.",
+                                  done.getOperation().getOp(),
+                                  done.getOperation().getReq());
+                    }
+                    // Explicitly surface apply failures to the caller instead of
+                    // letting the request hang until timeout. The Raft log still
+                    // advances below.
+                    if (closure != null && t instanceof HgStoreException) {
+                        HgStoreException e = (HgStoreException) t;
+                        closure.run(new Status(HgRaftError.UNKNOWN.getNumber(),
+                                               e.getMessage() + " code=" + e.getCode()));
+                    } else if (closure != null) {
+                        closure.run(new Status(HgRaftError.UNKNOWN.getNumber(),
+                                               String.valueOf(t.getMessage())));
+                    }
                 }
             }
             committedIndex = iter.getIndex();
@@ -113,7 +174,10 @@ public class PartitionStateMachine extends StateMachineAdapter {
                 done.clear();
             }
             // next entry
-            iter.next();
+                iter.next();
+            }
+        } finally {
+            applyLock.unlock();
         }
     }
 
@@ -123,6 +187,29 @@ public class PartitionStateMachine extends StateMachineAdapter {
 
     public long getLeaderTerm() {
         return leaderTerm.get();
+    }
+
+    /**
+     * A temporal apply may throw {@link HgStoreException} with a temporal
+     * business-rejection code. Such an outcome is deterministic and identical on
+     * every replica; it is NOT a StateMachine critical error and must be handled
+     * on a distinct, quiet path (Slice 1 replay condition 2 / L1b).
+     */
+    private static boolean isTemporalBusinessRejection(int code) {
+        return code == HgStoreException.EC_TEMPORAL_CONFLICT ||
+               code == HgStoreException.EC_TEMPORAL_UNSUPPORTED_VERSION ||
+               code == HgStoreException.EC_TEMPORAL_CLOSED_INTERVAL_CONFLICT;
+    }
+
+    /** Map a temporal business-rejection code onto its dedicated raft error. */
+    private static HgRaftError temporalRaftError(int code) {
+        if (code == HgStoreException.EC_TEMPORAL_CONFLICT) {
+            return HgRaftError.TEMPORAL_CONFLICT;
+        }
+        if (code == HgStoreException.EC_TEMPORAL_CLOSED_INTERVAL_CONFLICT) {
+            return HgRaftError.TEMPORAL_CLOSED_INTERVAL_CONFLICT;
+        }
+        return HgRaftError.TEMPORAL_UNSUPPORTED_VERSION;
     }
 
     @Override

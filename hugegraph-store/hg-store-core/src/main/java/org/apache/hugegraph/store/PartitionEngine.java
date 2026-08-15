@@ -67,6 +67,7 @@ import org.apache.hugegraph.store.raft.RaftStateListener;
 import org.apache.hugegraph.store.raft.RaftTaskHandler;
 import org.apache.hugegraph.store.raft.util.RaftUtils;
 import org.apache.hugegraph.store.snapshot.SnapshotHandler;
+import org.apache.hugegraph.store.temporal.TemporalMutationHandler;
 import org.apache.hugegraph.store.util.FutureClosure;
 import org.apache.hugegraph.store.util.HgRaftError;
 import org.apache.hugegraph.store.util.HgStoreException;
@@ -180,6 +181,8 @@ public class PartitionEngine implements Lifecycle<PartitionEngineOptions>, RaftS
             this.stateMachine.addTaskHandler(opts.getTaskHandler());
         }
         this.stateMachine.addTaskHandler(new TaskHandler());
+        this.stateMachine.addTaskHandler(
+                new TemporalMutationHandler(storeEngine.getBusinessHandler()));
 
         // Listen for changes in the group leader
         this.stateMachine.addStateListener(this);
