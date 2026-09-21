@@ -2052,6 +2052,12 @@ public final class GraphManager {
         this.metaManager.listenGraphRemove(ConsumerWrapper.wrap(this::graphRemoveHandler));
         this.metaManager.listenGraphUpdate(ConsumerWrapper.wrap(this::graphUpdateHandler));
         this.metaManager.listenGraphClear(ConsumerWrapper.wrap(this::graphClearHandler));
+        this.metaManager.listenGraphSpaceAdd(
+                ConsumerWrapper.wrap(this::graphSpaceAddHandler));
+        this.metaManager.listenGraphSpaceRemove(
+                ConsumerWrapper.wrap(this::graphSpaceRemoveHandler));
+        this.metaManager.listenGraphSpaceUpdate(
+                ConsumerWrapper.wrap(this::graphSpaceUpdateHandler));
     }
 
     /**
@@ -2793,6 +2799,57 @@ public final class GraphManager {
                             .notifyAndWaitEvent(Events.STORE_CLEAR);
                 }
             }
+        }
+    }
+
+    private <T> void graphSpaceAddHandler(T response) {
+        List<String> names = this.metaManager
+                .extractGraphSpacesFromResponse(response);
+        if (names == null) {
+            return;
+        }
+        for (String name : names) {
+            if (this.graphSpaces.containsKey(name)) {
+                continue;
+            }
+            GraphSpace space = this.metaManager.graphSpace(name);
+            if (space == null) {
+                LOG.warn("The graph space config not exist: {}", name);
+                continue;
+            }
+            this.graphSpaces.putIfAbsent(name, space);
+            LOG.info("Accept graph space add signal from etcd for {}", name);
+        }
+    }
+
+    private <T> void graphSpaceRemoveHandler(T response) {
+        List<String> names = this.metaManager
+                .extractGraphSpacesFromResponse(response);
+        if (names == null) {
+            return;
+        }
+        for (String name : names) {
+            if (this.graphSpaces.remove(name) != null) {
+                LOG.info("Accept graph space remove signal from etcd for {}",
+                         name);
+            }
+        }
+    }
+
+    private <T> void graphSpaceUpdateHandler(T response) {
+        List<String> names = this.metaManager
+                .extractGraphSpacesFromResponse(response);
+        if (names == null) {
+            return;
+        }
+        for (String name : names) {
+            GraphSpace space = this.metaManager.graphSpace(name);
+            if (space == null) {
+                LOG.warn("The graph space config not exist: {}", name);
+                continue;
+            }
+            this.graphSpaces.put(name, space);
+            LOG.info("Accept graph space update signal from etcd for {}", name);
         }
     }
 
