@@ -153,6 +153,14 @@ public class HugeConfig extends PropertiesConfiguration {
             return value;
         }
 
+        // The value may come from a JSON source (e.g. the graph config stored
+        // in meta) where a number lost its original type, e.g. an Integer
+        // while the option expects Long. Reinterpret it via the option
+        // parser instead of rejecting it outright.
+        if (value instanceof Number) {
+            return option.parseConvert(value.toString());
+        }
+
         throw new IllegalArgumentException(
               String.format("Invalid value for key '%s': '%s'", key, value));
     }

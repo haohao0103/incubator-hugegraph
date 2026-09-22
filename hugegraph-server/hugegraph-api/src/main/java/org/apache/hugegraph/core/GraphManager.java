@@ -1306,9 +1306,16 @@ public final class GraphManager {
         // Convert HugeConfig to Map for processing
         Map<String, Object> newConfigs = new HashMap<>();
 
-        // Copy all properties from cloneConfig to newConfigs
+        // Copy all properties from cloneConfig to newConfigs.
+        // Normalize numbers to String like the REST create path (convConfig)
+        // does, otherwise they are persisted to meta as JSON numbers and
+        // other servers fail to rebuild the graph when reading them back
         cloneConfig.getKeys().forEachRemaining(key -> {
-            newConfigs.put(key, cloneConfig.getProperty(key));
+            Object value = cloneConfig.getProperty(key);
+            if (value instanceof Number) {
+                value = value.toString();
+            }
+            newConfigs.put(key, value);
         });
 
         // Override with new configurations if provided

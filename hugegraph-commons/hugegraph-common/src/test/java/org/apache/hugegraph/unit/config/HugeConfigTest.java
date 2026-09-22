@@ -429,6 +429,19 @@ public class HugeConfigTest extends BaseUnitTest {
         Assert.assertTrue(values.contains("b"));
     }
 
+    @Test
+    public void testFromMapConfigurationWithNarrowedNumber() {
+        // The numbers deserialized from JSON may be narrowed to Integer
+        // while the option expects Long (e.g. graph config stored in meta)
+        Map<String, Object> options = new HashMap<>();
+        options.put(TestOptions.long1.name(), 99);
+        options.put(TestOptions.int1.name(), 2);
+        MapConfiguration mapConfiguration = new MapConfiguration(options);
+        HugeConfig hugeConfig = new HugeConfig(mapConfiguration);
+        Assert.assertEquals(99L, (long) hugeConfig.get(TestOptions.long1));
+        Assert.assertEquals(2, (int) hugeConfig.get(TestOptions.int1));
+    }
+
     public static class TestOptions extends OptionHolder {
 
         private static volatile TestOptions instance;
