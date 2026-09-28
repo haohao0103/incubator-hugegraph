@@ -17,11 +17,7 @@
 package org.apache.hugegraph.store.temporal;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 
 import org.apache.hugegraph.rocksdb.access.RocksDBSession;
 import org.apache.hugegraph.rocksdb.access.ScanIterator;
@@ -31,6 +27,7 @@ import org.apache.hugegraph.store.constant.HugeServerTables;
 import org.apache.hugegraph.store.raft.RaftClosure;
 import org.apache.hugegraph.store.raft.RaftTaskHandler;
 import org.apache.hugegraph.store.util.HgStoreException;
+import org.apache.hugegraph.util.Bytes;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,7 +39,32 @@ public final class TemporalMutationHandler implements RaftTaskHandler {
 
     public static final byte TEMPORAL_MUTATION = 0x6A;
     private static final byte LEDGER_PREFIX = 0x01;
-    private static final ConcurrentMap<String, Object> FACT_LOCKS = new ConcurrentHashMap<>();
+
+    /**
+     * Fixed-size striped locks of {@link #factLock}: bounded memory instead of
+     * the previous unbounded per-fact intern map (one entry per distinct fact
+     * key ever written, a slow leak on a long-lived Store).
+     */
+    private static final int FACT_LOCK_STRIPES = 1024;
+    private static final Object[] FACT_LOCKS = new Object[FACT_LOCK_STRIPES];
+
+    static {
+        for (int i = 0; i < FACT_LOCKS.length; i++) {
+            FACT_LOCKS[i] = new Object();
+        }
+    }
+
+    /**
+     * Bucket-walk cap of the pruned conflict scan; beyond it the legacy full
+     * fact-sequence walk runs as the correctness fallback.
+     */
+    private static final int CONFLICT_SCAN_MAX_BUCKETS = 512;
+
+    /** Status bits returned by the conflict-scan helpers. */
+    private static final int SCAN_CONFLICT = 1;
+    private static final int SCAN_ACTIVE = 2;
+    private static final int SCAN_PAST_CANDIDATE = 4;
+
     private final BusinessHandler businessHandler;
 
     public TemporalMutationHandler(BusinessHandler businessHandler) {
@@ -57,7 +79,7 @@ public final class TemporalMutationHandler implements RaftTaskHandler {
         }
         try {
             apply(groupId, TemporalMutationBundleCodec.decode(
-                    Arrays.copyOfRange(request, 1, request.length)), applyIndex);
+                    request, 1, request.length - 1), applyIndex);
         } catch (IOException e) {
             throw unsupportedVersion(request[0], e);
         }
@@ -106,24 +128,7 @@ public final class TemporalMutationHandler implements RaftTaskHandler {
         // reads/conflict-scans could not reproduce.
         int code = PartitionUtils.calcHashcode(bundle.factKey());
         byte[] ledgerKey = ledgerKey(bundle.mutationId());
-        Object factLock = factLock(bundle);
-        synchronized (factLock) {
-            // Instrumentation (Slice 1 condition 3): resolve the RocksDB instance that
-            // backs this partition's writes so the verifier can prove the write and the
-            // conflict-scan read hit the SAME store instance (no split-brain). Borrowed
-            // with the same try-with-resources discipline as doGet -> close() is a
-            // refcount return, not a DB shutdown.
-            String rocksId;
-            try (RocksDBSession db = businessHandler.getSession(groupId)) {
-                rocksId = Integer.toHexString(System.identityHashCode(db)) + "@" + db.getDbPath();
-            }
-            LOG.info("temporal apply entry handlerId={} businessId={} rocksdb={} thread={} " +
-                     "groupId={} mutationId={} factKey={} code={} operation={} " +
-                     "interval=[{},{}] index={}",
-                     System.identityHashCode(this), System.identityHashCode(businessHandler),
-                     rocksId, Thread.currentThread().getName(), groupId, bundle.mutationId(),
-                     new String(bundle.factKey()), code, bundle.operation(),
-                     bundle.validFrom(), bundle.validTo(), applyIndex);
+        synchronized (factLock(bundle.graph(), code)) {
             if (businessHandler.doGet(bundle.graph(), code,
                                       HugeServerTables.TEMPORAL_HISTORY_TABLE,
                                       ledgerKey) != null) {
@@ -139,12 +144,10 @@ public final class TemporalMutationHandler implements RaftTaskHandler {
             try {
                 if (contributeOp(tx, bundle, code, ledgerKey, applyIndex)) {
                     tx.build().commit();
-                    LOG.info("temporal apply committed handlerId={} businessId={} thread={} " +
-                             "groupId={} mutationId={} index={} views={}",
-                             System.identityHashCode(this),
-                             System.identityHashCode(businessHandler),
-                             Thread.currentThread().getName(), groupId,
-                             bundle.mutationId(), applyIndex, bundle.views().size());
+                    LOG.info("temporal apply committed groupId={} mutationId={} " +
+                             "index={} operation={} views={}",
+                             groupId, bundle.mutationId(), applyIndex,
+                             bundle.operation(), bundle.views().size());
                 } else {
                     // Idempotent no-op (already-closed interval): nothing to persist.
                     tx.build().rollback();
@@ -227,18 +230,12 @@ public final class TemporalMutationHandler implements RaftTaskHandler {
                                   int code, byte[] ledgerKey, long applyIndex)
             throws HgStoreException {
         if (hasConflict(bundle, code)) {
-            LOG.warn("temporal conflict decision handlerId={} businessId={} " +
-                     "mutationId={} index={}", System.identityHashCode(this),
-                     System.identityHashCode(businessHandler),
+            LOG.warn("temporal conflict decision mutationId={} index={}",
                      bundle.mutationId(), applyIndex);
             throw new HgStoreException(HgStoreException.EC_TEMPORAL_CONFLICT,
                                        "TEMPORAL_CONFLICT for fact key");
         }
 
-        LOG.info("temporal conflict-clear handlerId={} businessId={} " +
-                 "mutationId={} index={}", System.identityHashCode(this),
-                 System.identityHashCode(businessHandler),
-                 bundle.mutationId(), applyIndex);
         byte[] revisionValue = TemporalIntervalCodec.value(bundle.payload(), applyIndex);
         for (TemporalMutationBundle.ViewMutation view : bundle.views()) {
             String table = table(view.name());
@@ -387,11 +384,32 @@ public final class TemporalMutationHandler implements RaftTaskHandler {
                elementKey(bundle, validFrom, validTo));
     }
 
-    /** Fact-scoped marker lookup by {@code valid_from}, skipping tombstones. */
+    /**
+     * Fact-scoped marker lookup by {@code valid_from}, skipping tombstones. An
+     * active marker of one {@code valid_from} can only live in two buckets: the
+     * open sentinel bucket (an open marker carries OPEN_BUCKET regardless of
+     * its start) or its own start bucket (a closed marker). Both are
+     * single-bucket seeks instead of a full fact-sequence scan; the open-bucket
+     * probe comes first, matching the key order of the previous full walk.
+     */
     private FoundInterval findInterval(String graph, int code, byte[] factKey,
                                        long validFrom) {
+        FoundInterval found = findIntervalInBucket(graph, code, factKey,
+                                                   TemporalIntervalCodec.OPEN_BUCKET,
+                                                   validFrom);
+        if (found != null) {
+            return found;
+        }
+        return findIntervalInBucket(graph, code, factKey,
+                                    TemporalIntervalCodec.bucketOf(validFrom), validFrom);
+    }
+
+    /** Marker lookup by {@code valid_from} within one bucket. */
+    private FoundInterval findIntervalInBucket(String graph, int code, byte[] factKey,
+                                               long bucket, long validFrom) {
+        byte[] prefix = TemporalIntervalCodec.bucketPrefix(factKey, bucket);
         try (ScanIterator iterator = businessHandler.scanPrefix(
-                graph, code, HugeServerTables.TEMPORAL_HISTORY_TABLE, factKey)) {
+                graph, code, HugeServerTables.TEMPORAL_HISTORY_TABLE, prefix)) {
             while (iterator.hasNext()) {
                 RocksDBSession.BackendColumn column = iterator.next();
                 TemporalIntervalCodec.Interval interval =
@@ -410,60 +428,256 @@ public final class TemporalMutationHandler implements RaftTaskHandler {
         return null;
     }
 
+    /**
+     * Conflict scan of an interval-creating write (APPEND/UPSERT), pruned to the
+     * marker buckets that can hold a conflicting active marker. A candidate
+     * {@code [valid_from, valid_to)} conflicts with an active marker
+     * {@code [from, to)} iff {@code valid_from < to && from < valid_to}, the same
+     * half-open rule as the frozen Slice 1 full walk:
+     *
+     * <ul>
+     *   <li>Phase A: one probe of the open sentinel bucket, where every open
+     *       marker lives.</li>
+     *   <li>Phase B: one ordered range scan from the candidate's own bucket to
+     *       the bucket after the candidate end (or the sequence end for an open
+     *       candidate). It also covers same-bucket markers that start before the
+     *       candidate start.</li>
+     *   <li>Phase C: at most {@link #CONFLICT_SCAN_MAX_BUCKETS} single-bucket
+     *       probes walking down to the first bucket holding an active marker;
+     *       that marker decides (overlapping -> conflict, otherwise the
+     *       non-overlap invariant proves every earlier marker ends at or before
+     *       it and cannot cross). A first-row probe skips both the walk and the
+     *       fallback when nothing lives below the candidate's bucket; the legacy
+     *       full walk runs as the correctness fallback only when older markers
+     *       may exist.</li>
+     * </ul>
+     *
+     * <p>D-1 (replica-divergence red line). {@code BusinessHandler.scan*} treats
+     * its code parameter as a key-hash code, not a partition id, so passing
+     * groupId here would resolve to the wrong partition and silently miss
+     * conflicts. {@code SCAN_ALL_PARTITIONS_ID} is NOT a valid remedy either:
+     * BusinessHandlerImpl maps code == -1 to getLeaderPartitionIds(graph), which
+     * filters on Partition.isLeader(). On a follower the owning partition is
+     * therefore excluded from the scan list, the conflict scan reads zero rows,
+     * hasConflict() returns false, and the follower COMMITS a mutation that the
+     * leader deterministically REJECTED. That makes the Raft apply
+     * non-deterministic and silently diverges the replicas (observed: groupId=6
+     * index=4059, hg-store1 rejected mutation-b while hg-store0/hg-store2
+     * committed it). Every scan below passes the fact-key hash, the same code
+     * already used by the ledger doGet() and by every tx.put() of the write
+     * path; it resolves through pdProvider.getPartitionByCode(), which is PD
+     * metadata independent of leadership. Read path == write path == identical
+     * on every replica.</p>
+     */
     private boolean hasConflict(TemporalMutationBundle bundle, int code) {
-        // D-1 (replica-divergence red line). BusinessHandler.scan* treats its code
-        // parameter as a key-hash code, not a partition id, so passing groupId here
-        // would resolve to the wrong partition and silently miss conflicts.
-        //
-        // SCAN_ALL_PARTITIONS_ID is NOT a valid remedy either: BusinessHandlerImpl
-        // maps code == -1 to getLeaderPartitionIds(graph), which filters on
-        // Partition.isLeader(). On a follower the owning partition is therefore
-        // excluded from the scan list, the conflict scan reads zero rows,
-        // hasConflict() returns false, and the follower COMMITS a mutation that the
-        // leader deterministically REJECTED. That makes the Raft apply
-        // non-deterministic and silently diverges the replicas (observed: groupId=6
-        // index=4059, hg-store1 rejected mutation-b while hg-store0/hg-store2
-        // committed it).
-        //
-        // The fact-key hash is the same code already used by the ledger doGet() and
-        // by every tx.put() below; it resolves through
-        // pdProvider.getPartitionByCode(), which is PD metadata and independent of
-        // leadership. Read path == write path == identical on every replica.
-        byte[] prefix = bundle.factKey();
-        try (ScanIterator iterator = businessHandler.scanPrefix(
-                bundle.graph(), code,
-                HugeServerTables.TEMPORAL_HISTORY_TABLE, prefix)) {
-            int scanned = 0;
+        byte[] factKey = bundle.factKey();
+        long newFrom = bundle.validFrom();
+        long candidateTo = bundle.open() ? Long.MAX_VALUE : bundle.validTo();
+
+        // Phase A: every open marker lives in the OPEN_BUCKET sentinel bucket
+        // (its sortable form sorts before all real buckets): one seek decides
+        // them all.
+        if ((scanMarkerBucket(bundle.graph(), code, factKey,
+                              TemporalIntervalCodec.OPEN_BUCKET, newFrom,
+                              candidateTo) & SCAN_CONFLICT) != 0) {
+            return true;
+        }
+
+        // Phase B: one ordered range scan from the candidate's own bucket
+        // prefix up to (excluding) the bucket after the candidate end -- or to
+        // the end of the fact sequence for an open candidate.
+        long fromBucket = TemporalIntervalCodec.bucketOf(newFrom);
+        byte[] fromKey = TemporalIntervalCodec.bucketPrefix(factKey, fromBucket);
+        byte[] toKey = candidateTo == Long.MAX_VALUE ? null :
+                       TemporalIntervalCodec.bucketPrefix(
+                               factKey,
+                               TemporalIntervalCodec.bucketOf(candidateTo - 1) + 1);
+        if (scanMarkerRange(bundle.graph(), code, factKey, fromKey, toKey,
+                            newFrom, candidateTo)) {
+            return true;
+        }
+
+        // Phase C: the remaining conflict candidates start before fromBucket.
+        // One first-row probe of the fact sequence decides whether such rows
+        // exist at all.
+        long windowStart = fromBucket - CONFLICT_SCAN_MAX_BUCKETS;
+        byte[] windowStartKey =
+                TemporalIntervalCodec.bucketPrefix(factKey, windowStart);
+        byte[] firstRow = firstFactRow(bundle.graph(), code, factKey);
+        if (firstRow == null || Bytes.compare(firstRow, fromKey) >= 0) {
+            // Either the fact sequence is empty, or every row lives in buckets
+            // >= fromBucket, which phases A/B already covered; markers starting
+            // at/after candidateTo cannot conflict.
+            return false;
+        }
+        // Walk down to the first bucket holding an active marker; that marker
+        // decides the whole lower region.
+        for (long bucket = fromBucket - 1, walked = 0;
+             walked < CONFLICT_SCAN_MAX_BUCKETS; bucket--, walked++) {
+            int status = scanMarkerBucket(bundle.graph(), code, factKey, bucket,
+                                          newFrom, candidateTo);
+            if ((status & SCAN_CONFLICT) != 0) {
+                return true;
+            }
+            if ((status & SCAN_ACTIVE) != 0) {
+                // Not overlapping: the non-overlap invariant proves every
+                // earlier marker ends at or before this one, hence before
+                // newFrom, and cannot cross the candidate.
+                return false;
+            }
+            if ((status & SCAN_PAST_CANDIDATE) != 0) {
+                // Defensive: markers below fromBucket cannot start at/after
+                // candidateTo; this means the non-overlap invariant is
+                // violated, so fall back to the full walk for correctness.
+                return legacyHasConflict(bundle, code);
+            }
+        }
+        // A first row at/after windowStart means every row lies inside the
+        // window covered by phases A-C; otherwise older markers may exist and
+        // the legacy full walk is the correctness fallback.
+        if (Bytes.compare(firstRow, windowStartKey) >= 0) {
+            return false;
+        }
+        return legacyHasConflict(bundle, code);
+    }
+
+    /**
+     * Ordered range scan over the marker buckets of the fact sequence starting
+     * at {@code fromKey}; {@code toKey == null} scans up to the end of the
+     * sequence. Returns whether an active marker in range overlaps the
+     * candidate. All scans pass the fact-key hash code (D-1).
+     */
+    private boolean scanMarkerRange(String graph, int code, byte[] factKey,
+                                    byte[] fromKey, byte[] toKey,
+                                    long newFrom, long candidateTo) {
+        try (ScanIterator iterator = businessHandler.scan(
+                graph, code, HugeServerTables.TEMPORAL_HISTORY_TABLE,
+                fromKey, toKey,
+                ScanIterator.Trait.SCAN_GTE_BEGIN | ScanIterator.Trait.SCAN_LT_END)) {
             while (iterator.hasNext()) {
                 RocksDBSession.BackendColumn column = iterator.next();
-                scanned++;
-                byte[] key = column.name;
-                LOG.debug("temporal conflict-scan key len={} headHex={}", key.length,
-                          toHex(key, 0, Math.min(8, key.length)));
                 TemporalIntervalCodec.Interval interval =
-                        TemporalIntervalCodec.parse(key, prefix);
+                        TemporalIntervalCodec.parse(column.name, factKey);
                 if (interval == null) {
-                    // ledger row or a fact-key hash collision; never fold it in.
+                    // Ledger row or a fact-key hash collision; never fold in.
+                    continue;
+                }
+                if (interval.validFrom >= candidateTo) {
+                    // Rows order by (bucket, valid_from): from here on every
+                    // marker starts at/after the candidate end.
+                    break;
+                }
+                if (TemporalIntervalCodec.state(column.value) ==
+                    TemporalIntervalCodec.STATE_TOMBSTONE) {
+                    // A deleted interval no longer participates.
+                    continue;
+                }
+                if (overlaps(interval, newFrom, candidateTo)) {
+                    logConflict(factKey, interval, newFrom, candidateTo);
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Single-bucket prefix probe. Returns the marker presence bits of the
+     * bucket: any conflict ({@link #SCAN_CONFLICT}), any active (non-tombstoned)
+     * marker ({@link #SCAN_ACTIVE}), and any marker starting at/after the
+     * candidate end ({@link #SCAN_PAST_CANDIDATE}).
+     */
+    private int scanMarkerBucket(String graph, int code, byte[] factKey,
+                                 long bucket, long newFrom, long candidateTo) {
+        byte[] prefix = TemporalIntervalCodec.bucketPrefix(factKey, bucket);
+        int status = 0;
+        try (ScanIterator iterator = businessHandler.scanPrefix(
+                graph, code, HugeServerTables.TEMPORAL_HISTORY_TABLE, prefix)) {
+            while (iterator.hasNext()) {
+                RocksDBSession.BackendColumn column = iterator.next();
+                TemporalIntervalCodec.Interval interval =
+                        TemporalIntervalCodec.parse(column.name, factKey);
+                if (interval == null) {
+                    continue;
+                }
+                if (interval.validFrom >= candidateTo) {
+                    status |= SCAN_PAST_CANDIDATE;
+                    break;
+                }
+                if (TemporalIntervalCodec.state(column.value) ==
+                    TemporalIntervalCodec.STATE_TOMBSTONE) {
+                    continue;
+                }
+                status |= SCAN_ACTIVE;
+                if (overlaps(interval, newFrom, candidateTo)) {
+                    logConflict(factKey, interval, newFrom, candidateTo);
+                    return SCAN_CONFLICT;
+                }
+            }
+        }
+        return status;
+    }
+
+    /** First row of the fact sequence, or {@code null} when it is empty. */
+    private byte[] firstFactRow(String graph, int code, byte[] factKey) {
+        try (ScanIterator iterator = businessHandler.scanPrefix(
+                graph, code, HugeServerTables.TEMPORAL_HISTORY_TABLE, factKey)) {
+            if (!iterator.hasNext()) {
+                return null;
+            }
+            RocksDBSession.BackendColumn column = iterator.next();
+            return column.name;
+        }
+    }
+
+    /**
+     * Conflict rule of the frozen Slice 1 walk, deliberately left un-simplified
+     * to keep the zero-length boundary behavior identical.
+     */
+    private static boolean overlaps(TemporalIntervalCodec.Interval interval,
+                                    long newFrom, long candidateTo) {
+        long existingTo = interval.open ? Long.MAX_VALUE : interval.validTo;
+        return newFrom < existingTo && interval.validFrom < candidateTo;
+    }
+
+    private static void logConflict(byte[] factKey,
+                                    TemporalIntervalCodec.Interval interval,
+                                    long candidateFrom, long candidateTo) {
+        LOG.warn("temporal conflict detected factKey={} from={} to={} " +
+                 "candidate=[{},{})",
+                 new String(factKey, StandardCharsets.UTF_8), interval.validFrom,
+                 interval.open ? Long.MAX_VALUE : interval.validTo,
+                 candidateFrom, candidateTo);
+    }
+
+    /**
+     * Legacy full fact-sequence conflict walk (frozen Slice 1 behavior): the
+     * correctness fallback when the pruned scan cannot rule the lower region
+     * out. All scans pass the fact-key hash code (D-1).
+     */
+    private boolean legacyHasConflict(TemporalMutationBundle bundle, int code) {
+        byte[] factKey = bundle.factKey();
+        long newFrom = bundle.validFrom();
+        long candidateTo = bundle.open() ? Long.MAX_VALUE : bundle.validTo();
+        try (ScanIterator iterator = businessHandler.scanPrefix(
+                bundle.graph(), code, HugeServerTables.TEMPORAL_HISTORY_TABLE,
+                factKey)) {
+            while (iterator.hasNext()) {
+                RocksDBSession.BackendColumn column = iterator.next();
+                TemporalIntervalCodec.Interval interval =
+                        TemporalIntervalCodec.parse(column.name, factKey);
+                if (interval == null) {
                     continue;
                 }
                 if (TemporalIntervalCodec.state(column.value) ==
                     TemporalIntervalCodec.STATE_TOMBSTONE) {
-                    // A deleted interval no longer participates in conflict checks.
                     continue;
                 }
-                long from = interval.validFrom;
-                long to = interval.open ? Long.MAX_VALUE : interval.validTo;
-                long candidateTo = bundle.open() ? Long.MAX_VALUE : bundle.validTo();
-                long existingTo = to == Long.MAX_VALUE ? Long.MAX_VALUE : to;
-                if (bundle.validFrom() < existingTo && from < candidateTo) {
-                    LOG.warn("temporal conflict detected factKey={} from={} to={} " +
-                             "candidate=[{},{}) scanned={}",
-                             new String(bundle.factKey()), from, to,
-                             bundle.validFrom(), candidateTo, scanned);
+                if (overlaps(interval, newFrom, candidateTo)) {
+                    logConflict(factKey, interval, newFrom, candidateTo);
                     return true;
                 }
             }
-            LOG.debug("temporal conflict-scan done scanned={}", scanned);
             return false;
         }
     }
@@ -487,29 +701,23 @@ public final class TemporalMutationHandler implements RaftTaskHandler {
     }
 
     /**
-     * Per-fact interned lock guarding the standalone apply path against a
-     * concurrent same-fact apply on this replica (leader vs. follower thread).
-     * Keyed by graph + fact key, identical to the frozen Slice 1 lock key.
+     * Striped lock guarding the standalone apply path against a concurrent
+     * same-fact apply on this replica (leader vs. follower thread). The stripe
+     * is derived from the graph and the fact-key partition code, so one fact
+     * always maps to one stripe -- the same mutual exclusion as the frozen
+     * Slice 1 per-fact lock -- while the lock array stays fixed-size.
      */
-    private static Object factLock(TemporalMutationBundle bundle) {
-        String lockKey = bundle.graph() + "\\u0000" + new String(bundle.factKey(),
-                                                                  StandardCharsets.UTF_8);
-        return FACT_LOCKS.computeIfAbsent(lockKey, key -> new Object());
+    private static Object factLock(String graph, int code) {
+        return FACT_LOCKS[Math.floorMod(graph.hashCode() * 31 + code,
+                                        FACT_LOCK_STRIPES)];
     }
 
     private static byte[] ledgerKey(String mutationId) {
         byte[] id = mutationId.getBytes(StandardCharsets.UTF_8);
-        ByteBuffer buffer = ByteBuffer.allocate(1 + id.length);
-        buffer.put(LEDGER_PREFIX).put(id);
-        return buffer.array();
-    }
-
-    private static String toHex(byte[] bytes, int off, int len) {
-        StringBuilder sb = new StringBuilder(len * 2);
-        for (int i = off; i < off + len; i++) {
-            sb.append(String.format("%02x", bytes[i]));
-        }
-        return sb.toString();
+        byte[] key = new byte[1 + id.length];
+        key[0] = LEDGER_PREFIX;
+        System.arraycopy(id, 0, key, 1, id.length);
+        return key;
     }
 
     /** A located, non-tombstoned interval marker. */

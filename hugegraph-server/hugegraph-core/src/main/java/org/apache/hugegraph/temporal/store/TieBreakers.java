@@ -17,7 +17,6 @@
 
 package org.apache.hugegraph.temporal.store;
 
-import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -43,6 +42,20 @@ public final class TieBreakers {
     private static final char[] BASE32 =
             "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".toCharArray();
 
+    /**
+     * Pooled SHA-256 digest, one instance per thread ({@link MessageDigest} is
+     * not thread safe). The previous per-call {@code MessageDigest.getInstance}
+     * paid a JCA provider lookup on every write request; the digest is used for
+     * the tie_breaker, the fact-key hash and the colocation hash.
+     */
+    private static final ThreadLocal<MessageDigest> SHA256 = ThreadLocal.withInitial(() -> {
+        try {
+            return MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is required", e);
+        }
+    });
+
     private TieBreakers() {
     }
 
@@ -61,26 +74,36 @@ public final class TieBreakers {
         return base32(digest).substring(0, LENGTH);
     }
 
-    /** Unambiguous length-prefixed concatenation. */
+    /**
+     * Unambiguous length-prefixed concatenation. The result is pre-sized in
+     * one pass instead of growing a {@code ByteArrayOutputStream}; the emitted
+     * bytes are identical (4-byte big-endian length, then the payload).
+     */
     static byte[] concat(byte[]... parts) {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        int total = 0;
         for (byte[] part : parts) {
-            byte[] p = part == null ? new byte[0] : part;
-            out.write((p.length >>> 24) & 0xFF);
-            out.write((p.length >>> 16) & 0xFF);
-            out.write((p.length >>> 8) & 0xFF);
-            out.write(p.length & 0xFF);
-            out.write(p, 0, p.length);
+            total += Integer.BYTES + (part == null ? 0 : part.length);
         }
-        return out.toByteArray();
+        byte[] out = new byte[total];
+        int pos = 0;
+        for (byte[] part : parts) {
+            int len = part == null ? 0 : part.length;
+            out[pos++] = (byte) ((len >>> 24) & 0xFF);
+            out[pos++] = (byte) ((len >>> 16) & 0xFF);
+            out[pos++] = (byte) ((len >>> 8) & 0xFF);
+            out[pos++] = (byte) (len & 0xFF);
+            if (len > 0) {
+                System.arraycopy(part, 0, out, pos, len);
+                pos += len;
+            }
+        }
+        return out;
     }
 
     static byte[] sha256(byte[] input) {
-        try {
-            return MessageDigest.getInstance("SHA-256").digest(input);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is required", e);
-        }
+        MessageDigest digest = SHA256.get();
+        digest.reset();
+        return digest.digest(input);
     }
 
     static String base32(byte[] data) {

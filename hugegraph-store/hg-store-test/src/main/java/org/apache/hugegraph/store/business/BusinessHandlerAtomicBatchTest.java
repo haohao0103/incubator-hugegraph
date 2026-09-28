@@ -75,6 +75,8 @@ public class BusinessHandlerAtomicBatchTest {
         // contributed into the shared transaction.
         doReturn(null).when(business).doGet(anyString(), anyInt(), anyString(), any());
         doReturn(emptyScan()).when(business).scanPrefix(anyString(), anyInt(), anyString(), any());
+        doReturn(emptyScan()).when(business).scan(anyString(), anyInt(), anyString(),
+                                                  any(), any(), anyInt());
         when(builder.put(anyInt(), anyString(), any(), any())).thenReturn(builder);
         when(builder.build()).thenReturn(tx);
         doNothing().when(tx).commit();
@@ -111,6 +113,8 @@ public class BusinessHandlerAtomicBatchTest {
         TemporalMutationBundle existing = bundle("m1", 10, 20);
         doReturn(conflictScan(existing))
                 .when(business).scanPrefix(anyString(), anyInt(), anyString(), any());
+        doReturn(emptyScan()).when(business).scan(anyString(), anyInt(), anyString(),
+                                                  any(), any(), anyInt());
         when(builder.put(anyInt(), anyString(), any(), any())).thenReturn(builder);
         when(builder.build()).thenReturn(tx);
         doNothing().when(tx).commit();

@@ -47,11 +47,6 @@ public class TemporalMutationHandlerTest {
         BusinessHandler.TxBuilder builder = mock(BusinessHandler.TxBuilder.class);
         BusinessHandler.Tx tx = mock(BusinessHandler.Tx.class);
         TemporalMutationHandler handler = new TemporalMutationHandler(business);
-        // The apply path borrows a RocksDB session for its instrumentation line;
-        // return a stub so the handler can read its path without a real DB.
-        RocksDBSession session = mock(RocksDBSession.class);
-        when(session.getDbPath()).thenReturn("/tmp/temporal-handler-test");
-        when(business.getSession(anyInt())).thenReturn(session);
         when(business.doGet(anyString(), anyInt(), anyString(), any())).thenReturn(null);
         when(business.txBuilder("g", 7)).thenReturn(builder);
         when(builder.put(anyInt(), anyString(), any(), any())).thenReturn(builder);
@@ -61,6 +56,11 @@ public class TemporalMutationHandlerTest {
         ScanIterator initialScan = emptyScan();
         when(business.scanPrefix(anyString(), anyInt(), anyString(), any()))
                 .thenReturn(initialScan);
+        // The pruned conflict scan also opens one ordered range scan; an empty
+        // result keeps the fact sequence conflict-free for this stub.
+        ScanIterator rangeScan = emptyScan();
+        when(business.scan(anyString(), anyInt(), anyString(), any(), any(), anyInt()))
+                .thenReturn(rangeScan);
 
         TemporalMutationBundle first = bundle("m1", 10, 20);
         assertEquals(true, handler.invoke(7, request(first), null, 41L));

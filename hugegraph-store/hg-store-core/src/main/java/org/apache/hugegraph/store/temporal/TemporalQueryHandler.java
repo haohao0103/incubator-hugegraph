@@ -311,9 +311,11 @@ public final class TemporalQueryHandler {
             }
         }
         rows.sort(Comparator.comparingLong(TemporalIntervalRow::validFrom));
-        LOG.debug("temporal query bucket-scan graph={} factKey={} bucket={} rows={}",
-                  graph, new String(factKey, java.nio.charset.StandardCharsets.UTF_8),
-                  bucket, rows.size());
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("temporal query bucket-scan graph={} factKey={} bucket={} rows={}",
+                      graph, new String(factKey, java.nio.charset.StandardCharsets.UTF_8),
+                      bucket, rows.size());
+        }
         return rows;
     }
 

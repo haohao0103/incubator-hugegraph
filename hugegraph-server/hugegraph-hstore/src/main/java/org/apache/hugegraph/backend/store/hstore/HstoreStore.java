@@ -91,6 +91,14 @@ public abstract class HstoreStore extends AbstractBackendStore<Session>
     );
 
     private static final BackendFeatures FEATURES = new HstoreFeatures();
+
+    /**
+     * Stateless, immutable and thread-safe row-key codec shared by all temporal
+     * writes (a per-request instance was allocated before).
+     */
+    private static final TemporalRowKeyCodec TEMPORAL_ROW_KEY_CODEC =
+            new TemporalRowKeyCodec();
+
     private final String store, namespace;
 
     private final BackendStoreProvider provider;
@@ -713,7 +721,7 @@ public abstract class HstoreStore extends AbstractBackendStore<Session>
                 request.validTo(), request.payload(), request.mutationId(),
                 request.schemaVersion());
         TemporalMutationBundle bundle =
-                TemporalMutationBundleFactory.build(storeRequest, new TemporalRowKeyCodec());
+                TemporalMutationBundleFactory.build(storeRequest, TEMPORAL_ROW_KEY_CODEC);
         byte[] encoded;
         try {
             encoded = TemporalMutationBundleCodec.encode(bundle);

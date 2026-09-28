@@ -16,7 +16,6 @@
  */
 package org.apache.hugegraph.store.temporal;
 
-import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 
 /**
@@ -88,13 +87,14 @@ public final class TemporalIntervalCodec {
 
     public static byte[] intervalKey(byte[] factKey, long validFrom, long validTo) {
         long bucket = validTo == OPEN_VALID_TO ? OPEN_BUCKET : bucketOf(validFrom);
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        out.write(factKey, 0, factKey.length);
-        out.write(MARKER_VERSION);
-        writeSortableLong(out, bucket);
-        writeSortableLong(out, validFrom);
-        writeSortableLong(out, validTo);
-        return out.toByteArray();
+        byte[] key = new byte[factKey.length + MARKER_BYTES];
+        System.arraycopy(factKey, 0, key, 0, factKey.length);
+        int pos = factKey.length;
+        key[pos++] = MARKER_VERSION;
+        pos = writeSortableLong(key, pos, bucket);
+        pos = writeSortableLong(key, pos, validFrom);
+        writeSortableLong(key, pos, validTo);
+        return key;
     }
 
     public static byte[] intervalKey(TemporalMutationBundle bundle) {
@@ -104,11 +104,12 @@ public final class TemporalIntervalCodec {
 
     /** Prefix of every marker of one fact sequence that lives in {@code bucket}. */
     public static byte[] bucketPrefix(byte[] factKey, long bucket) {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        out.write(factKey, 0, factKey.length);
-        out.write(MARKER_VERSION);
-        writeSortableLong(out, bucket);
-        return out.toByteArray();
+        byte[] prefix = new byte[factKey.length + 1 + Long.BYTES];
+        System.arraycopy(factKey, 0, prefix, 0, factKey.length);
+        int pos = factKey.length;
+        prefix[pos++] = MARKER_VERSION;
+        writeSortableLong(prefix, pos, bucket);
+        return prefix;
     }
 
     /**
@@ -188,11 +189,16 @@ public final class TemporalIntervalCodec {
         return payload;
     }
 
-    private static void writeSortableLong(ByteArrayOutputStream out, long value) {
+    /**
+     * Sign flipped big endian long written at {@code offset}: byte order equals
+     * numeric order. Returns the offset after the written 8 bytes.
+     */
+    private static int writeSortableLong(byte[] out, int offset, long value) {
         long v = value ^ Long.MIN_VALUE;
         for (int i = 7; i >= 0; i--) {
-            out.write((int) ((v >>> (i * 8)) & 0xFF));
+            out[offset++] = (byte) ((v >>> (i * 8)) & 0xFF);
         }
+        return offset;
     }
 
     private static long readSortableLong(ByteBuffer buffer) {

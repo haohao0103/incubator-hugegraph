@@ -83,7 +83,9 @@ public final class TemporalRowKeyCodec {
     }
 
     public byte[] factKeyHash(TemporalFactKey factKey) {
-        byte[] digest = TieBreakers.sha256(factKey.canonicalBytes());
+        // Hot path: hash straight from the internal canonical bytes; the digest
+        // only reads its input.
+        byte[] digest = TieBreakers.sha256(factKey.canonicalBytesView());
         byte[] hash = new byte[1 + this.factKeyHashBytes];
         // versioned hash encoding
         hash[0] = ROW_KEY_VERSION;
@@ -111,19 +113,30 @@ public final class TemporalRowKeyCodec {
     public byte[] historyRowKey(String graphId, String temporalLabel,
                                 String entityId, TemporalFactKey factKey,
                                 long validFromMillis, String tieBreaker) {
+        return historyRowKey(groupPrefix(graphId, temporalLabel, entityId, factKey),
+                             validFromMillis, tieBreaker);
+    }
+
+    /**
+     * History row key assembled over an already-computed group prefix: the
+     * write path derives the prefix once per request and reuses it for every
+     * view, instead of re-hashing the fact key per view.
+     */
+    public byte[] historyRowKey(byte[] groupPrefix, long validFromMillis,
+                                String tieBreaker) {
         if (tieBreaker == null || tieBreaker.length() != TieBreakers.LENGTH) {
             throw new IllegalArgumentException(
                     "tie_breaker must be exactly " + TieBreakers.LENGTH +
                     " chars, got: " + tieBreaker);
         }
-        byte[] prefix = groupPrefix(graphId, temporalLabel, entityId, factKey);
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        out.write(prefix, 0, prefix.length);
-        writeSortableLong(out, bucketOf(validFromMillis));
-        writeSortableLong(out, validFromMillis);
         byte[] tb = tieBreaker.getBytes(StandardCharsets.US_ASCII);
-        out.write(tb, 0, tb.length);
-        return out.toByteArray();
+        byte[] key = new byte[groupPrefix.length + 2 * Long.BYTES + tb.length];
+        System.arraycopy(groupPrefix, 0, key, 0, groupPrefix.length);
+        int pos = writeSortableLong(key, groupPrefix.length,
+                                    bucketOf(validFromMillis));
+        pos = writeSortableLong(key, pos, validFromMillis);
+        System.arraycopy(tb, 0, key, pos, tb.length);
+        return key;
     }
 
     private static void writeString(ByteArrayOutputStream out, String s) {
@@ -135,12 +148,16 @@ public final class TemporalRowKeyCodec {
         out.write(raw, 0, raw.length);
     }
 
-    /** Sign flipped big endian long: byte order equals numeric order. */
-    static void writeSortableLong(ByteArrayOutputStream out, long value) {
+    /**
+     * Sign flipped big endian long written at {@code offset}: byte order equals
+     * numeric order. Returns the offset after the written 8 bytes.
+     */
+    static int writeSortableLong(byte[] out, int offset, long value) {
         long v = value ^ Long.MIN_VALUE;
         for (int i = 7; i >= 0; i--) {
-            out.write((int) ((v >>> (i * 8)) & 0xFF));
+            out[offset++] = (byte) ((v >>> (i * 8)) & 0xFF);
         }
+        return offset;
     }
 
     /** Unsigned lexicographic byte comparison, the Store row order. */

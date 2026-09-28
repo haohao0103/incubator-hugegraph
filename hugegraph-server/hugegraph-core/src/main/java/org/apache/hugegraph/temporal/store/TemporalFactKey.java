@@ -99,6 +99,16 @@ public final class TemporalFactKey {
         return Arrays.copyOf(this.canonicalBytes, this.canonicalBytes.length);
     }
 
+    /**
+     * No-copy accessor for package-internal hot paths that only read the bytes
+     * or copy them onward (digest input, key assembly). The returned array must
+     * neither be mutated nor retained by the caller; external callers keep the
+     * defensive-copy contract of {@link #canonicalBytes()}.
+     */
+    byte[] canonicalBytesView() {
+        return this.canonicalBytes;
+    }
+
     public List<String> dimensionOrder() {
         return this.dimensionOrder;
     }

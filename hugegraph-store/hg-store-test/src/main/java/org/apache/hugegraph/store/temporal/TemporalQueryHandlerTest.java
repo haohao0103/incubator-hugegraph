@@ -726,6 +726,34 @@ public class TemporalQueryHandlerTest {
                         return new ListScanIterator(columns);
                     });
 
+            // Ordered range scan of the conflict-scan phases: [start, end) with
+            // SCAN_GTE_BEGIN | SCAN_LT_END; a null end scans to the table tail.
+            when(this.businessHandler.scan(anyString(), anyInt(), anyString(), any(),
+                                           any(), anyInt()))
+                    .thenAnswer(invocation -> {
+                        String table = invocation.getArgument(2);
+                        byte[] start = invocation.getArgument(3);
+                        byte[] end = invocation.getArgument(4);
+                        List<RocksDBSession.BackendColumn> columns = new ArrayList<>();
+                        for (Map.Entry<KeyTuple, byte[]> entry : this.store.entrySet()) {
+                            KeyTuple key = entry.getKey();
+                            if (!key.table.equals(table)) {
+                                continue;
+                            }
+                            if (start != null &&
+                                TemporalIntervalCodecCompare.compare(key.key, start) < 0) {
+                                continue;
+                            }
+                            if (end != null &&
+                                TemporalIntervalCodecCompare.compare(key.key, end) >= 0) {
+                                continue;
+                            }
+                            columns.add(RocksDBSession.BackendColumn.of(key.key,
+                                                                        entry.getValue()));
+                        }
+                        return new ListScanIterator(columns);
+                    });
+
             BusinessHandler.TxBuilder builder = mock(BusinessHandler.TxBuilder.class);
             when(builder.put(anyInt(), anyString(), any(), any()))
                     .thenAnswer(invocation -> {

@@ -69,14 +69,16 @@ public final class TemporalMutationPlanner {
 
     public static TemporalMutationPlan plan(TemporalWrite.Request request,
                                             TemporalRowKeyCodec codec) {
+        // Read the canonical fact key once per request: the digest inputs and
+        // key assemblies below only copy or read it onward.
+        byte[] canonicalFactKey = request.factKey().canonicalBytesView();
         if (request.operation() == TemporalWrite.Operation.CLOSE ||
             request.operation() == TemporalWrite.Operation.DELETE) {
             // close/delete mutate the current pointer and remove the open-index
             // entry (design ruling §3.2); they carry no interval views and are
             // applied by the close/delete state machine on the Store path.
             String tieBreaker = TieBreakers.derive(
-                    request.mutationId(),
-                    request.factKey().canonicalBytes(),
+                    request.mutationId(), canonicalFactKey,
                     request.canonicalIntervalPayload());
             return new TemporalMutationPlan(request, tieBreaker,
                                             Collections.emptyList());
@@ -89,20 +91,18 @@ public final class TemporalMutationPlanner {
         }
 
         String tieBreaker = TieBreakers.derive(
-                request.mutationId(),
-                request.factKey().canonicalBytes(),
+                request.mutationId(), canonicalFactKey,
                 request.canonicalIntervalPayload());
+        // One group prefix per request: the history row key reuses it instead
+        // of re-deriving (and re-hashing the fact key) per view.
         byte[] prefix = codec.groupPrefix(request.graphId(), request.temporalLabel(),
                                           request.entityId(), request.factKey());
 
         List<TemporalMutationPlan.ViewKey> views = new ArrayList<>(4);
         views.add(new TemporalMutationPlan.ViewKey(HISTORY_VIEW,
-                codec.historyRowKey(request.graphId(), request.temporalLabel(),
-                                    request.entityId(), request.factKey(),
-                                    request.validFrom(), tieBreaker)));
+                codec.historyRowKey(prefix, request.validFrom(), tieBreaker)));
         views.add(new TemporalMutationPlan.ViewKey(CURRENT_VIEW,
-                append(prefix, new byte[]{CURRENT_MARKER},
-                       request.factKey().canonicalBytes())));
+                append(prefix, new byte[]{CURRENT_MARKER}, canonicalFactKey)));
         if (request.validTo() == null) {
             views.add(new TemporalMutationPlan.ViewKey(OPEN_INDEX_VIEW,
                     indexKey(prefix, OPEN_MARKER, request.validFrom(), tieBreaker)));

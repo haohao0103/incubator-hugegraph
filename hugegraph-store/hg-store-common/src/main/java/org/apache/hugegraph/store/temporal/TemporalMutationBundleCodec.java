@@ -71,7 +71,19 @@ public final class TemporalMutationBundleCodec {
         if (encoded == null) {
             throw new NullPointerException("encoded");
         }
-        DataInputStream in = new DataInputStream(new ByteArrayInputStream(encoded));
+        return decode(encoded, 0, encoded.length);
+    }
+
+    /**
+     * Decode the bundle serialized in {@code encoded[offset, offset+length)}:
+     * the Raft task payload prefixes the codec stream with its method byte, so
+     * the apply path decodes its range in place instead of copying it out
+     * first.
+     */
+    public static TemporalMutationBundle decode(byte[] encoded, int offset, int length)
+            throws IOException {
+        DataInputStream in = new DataInputStream(
+                new ByteArrayInputStream(encoded, offset, length));
         int version = in.readInt();
         if (version != TemporalMutationBundle.CODEC_VERSION) {
             throw new IOException("unsupported temporal bundle version: " + version);
