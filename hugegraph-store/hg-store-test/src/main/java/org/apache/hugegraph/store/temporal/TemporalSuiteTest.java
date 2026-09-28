@@ -29,9 +29,10 @@ import org.junit.runners.Suite;
  * <p>Only tests that run free (no live PD/Store/Raft cluster) belong here, so
  * the suite is safe to wire into the default {@code mvn test} lifecycle. The
  * interval codec / mutation handler / query handler cover the fact-scoped
- * bucketed layout and its bounded-scan guards; the raft-scoping, raft-replay
- * and atomic-batch tests pin the "explicit fail instead of silent skip",
- * replay-branch log advancement / rejection classification and
+ * bucketed layout and its bounded-scan guards; the feature-flag test pins the
+ * rollout gate and its replay-ungated rollback boundary; the raft-scoping,
+ * raft-replay and atomic-batch tests pin the "explicit fail instead of silent
+ * skip", replay-branch log advancement / rejection classification and
  * same-transaction invariants. Cluster-dependent integration tests
  * ({@code TemporalStoreDirect*Test}) are deliberately excluded: they require a
  * real HStore/PD/Raft deployment and are validated in the Phase 2/3 cluster
@@ -40,6 +41,7 @@ import org.junit.runners.Suite;
 @RunWith(Suite.class)
 @Suite.SuiteClasses({
         TemporalMutationBundleCodecTest.class,
+        TemporalFeatureFlagTest.class,
         TemporalMutationHandlerTest.class,
         TemporalQueryHandlerTest.class,
         PartitionStateMachineTemporalScopingTest.class,
