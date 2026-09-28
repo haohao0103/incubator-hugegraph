@@ -405,7 +405,7 @@ public interface HugeGraph extends Graph {
      * {@code overlap}). The default fails explicitly; a temporal backend
      * overrides it.
      */
-    default List<org.apache.hugegraph.temporal.store.TemporalIntervalResult>
+    default org.apache.hugegraph.temporal.store.TemporalQueryPage
     temporalQuery(org.apache.hugegraph.temporal.store.TemporalFactKey factKey,
                   org.apache.hugegraph.temporal.TemporalQuery query) {
         throw new UnsupportedOperationException(

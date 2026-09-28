@@ -153,14 +153,24 @@ class GrpcStoreSessionClient extends AbstractGrpcClient {
     }
 
     TemporalQueryRes doTemporalQuery(HgStoreNodeSession nodeSession, byte[] factKey,
-                                     TemporalQueryType type, long from, long to) {
-        return this.getBlockingStub(nodeSession)
-                   .temporalQuery(TemporalQueryReq.newBuilder()
+                                     TemporalQueryType type, long from, long to,
+                                     long limit, byte[] pageToken) {
+        TemporalQueryReq.Builder builder = TemporalQueryReq.newBuilder()
                            .setHeader(getHeader(nodeSession))
                            .setFactKey(ByteString.copyFrom(factKey))
                            .setType(type)
                            .setFrom(from)
-                           .setTo(to)
-                           .build());
+                           .setTo(to);
+        // Phase 4 (additive): only set the paging fields when the caller asked
+        // for a cap / a resume cursor, so unset requests keep pre-Phase-4 wire
+        // behavior and stay backward compatible.
+        if (limit > 0) {
+            builder.setLimit(limit);
+        }
+        if (pageToken != null && pageToken.length > 0) {
+            builder.setPageToken(ByteString.copyFrom(pageToken));
+        }
+        return this.getBlockingStub(nodeSession)
+                   .temporalQuery(builder.build());
     }
 }

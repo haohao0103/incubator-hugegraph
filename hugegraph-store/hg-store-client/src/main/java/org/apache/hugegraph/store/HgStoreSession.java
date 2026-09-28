@@ -62,6 +62,20 @@ public interface HgStoreSession extends HgKvStore {
      */
     default TemporalQueryRes temporalQuery(byte[] factKey, TemporalQueryType type,
                                            long from, long to) {
+        return temporalQuery(factKey, type, from, to, 0L, new byte[0]);
+    }
+
+    /**
+     * Paged fact-scoped temporal read (Phase 4). {@code limit <= 0} means "no
+     * client cap"; {@code pageToken} is the opaque cursor from a previous page
+     * (empty = first page). The response carries the intervals of this page,
+     * {@code next_page_token} (empty when complete) and {@code scanned_rows}.
+     * The default keeps other session implementations honest by failing
+     * explicitly.
+     */
+    default TemporalQueryRes temporalQuery(byte[] factKey, TemporalQueryType type,
+                                           long from, long to, long limit,
+                                           byte[] pageToken) {
         throw new UnsupportedOperationException(
                 "temporalQuery transport is not wired for " +
                 getClass().getName());

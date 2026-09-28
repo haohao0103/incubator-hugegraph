@@ -538,8 +538,8 @@ public class HstoreSessionsImpl extends HstoreSessions {
         public org.apache.hugegraph.store.grpc.session.TemporalQueryRes temporalQuery(
                 byte[] factKey,
                 org.apache.hugegraph.store.grpc.session.TemporalQueryType type,
-                long from, long to) {
-            return this.graph.temporalQuery(factKey, type, from, to);
+                long from, long to, long limit, byte[] pageToken) {
+            return this.graph.temporalQuery(factKey, type, from, to, limit, pageToken);
         }
 
         @Override

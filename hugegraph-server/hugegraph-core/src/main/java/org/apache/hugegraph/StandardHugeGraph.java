@@ -733,7 +733,7 @@ public class StandardHugeGraph implements HugeGraph {
     }
 
     @Override
-    public java.util.List<org.apache.hugegraph.temporal.store.TemporalIntervalResult>
+    public org.apache.hugegraph.temporal.store.TemporalQueryPage
     temporalQuery(org.apache.hugegraph.temporal.store.TemporalFactKey factKey,
                   org.apache.hugegraph.temporal.TemporalQuery query) {
         return this.graphTransaction().temporalQuery(factKey, query);

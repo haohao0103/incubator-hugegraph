@@ -130,11 +130,24 @@ message TemporalQueryReq {
   TemporalQueryType type = 3;
   int64 from = 4;   // AS_OF time, or BETWEEN/OVERLAP lower bound.
   int64 to = 5;     // BETWEEN/OVERLAP upper bound; unused for AS_OF.
+  // Phase 4 (additive, optional): cap the intervals returned and resume a paged
+  // fact-scoped scan. limit <= 0 means "no client cap" (the handler still
+  // enforces its absolute scan budget); page_token is the opaque cursor from a
+  // previous page (empty = first page). Unset fields keep pre-Phase-4 behavior,
+  // so the wire contract stays backward compatible.
+  int64 limit = 6;
+  bytes page_token = 7;
 }
 
 message TemporalQueryRes {
   ResStatus status = 1;
   repeated TemporalInterval interval = 2;
+  // Phase 4 (additive): opaque cursor for the next page; empty means the result
+  // set is complete. scanned_rows exposes scan amplification so the frozen
+  // "scanned rows <= 10x returned rows" gate (design doc §5.4) is measurable
+  // end to end.
+  bytes next_page_token = 3;
+  int64 scanned_rows = 4;
 }
 
 message TemporalInterval {

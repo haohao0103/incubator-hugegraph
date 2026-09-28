@@ -18,6 +18,7 @@
 package org.apache.hugegraph.api.temporal;
 
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,6 +30,7 @@ import org.apache.hugegraph.temporal.TemporalQuery;
 import org.apache.hugegraph.temporal.TemporalTime;
 import org.apache.hugegraph.temporal.store.TemporalFactKey;
 import org.apache.hugegraph.temporal.store.TemporalIntervalResult;
+import org.apache.hugegraph.temporal.store.TemporalQueryPage;
 import org.apache.hugegraph.temporal.store.TemporalWrite;
 import org.apache.hugegraph.util.E;
 import org.apache.hugegraph.util.JsonUtil;
@@ -47,6 +49,7 @@ import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.Response;
 
 /**
  * Independent temporal REST resource (Phase 5). Fact-scoped append / upsert /
@@ -109,14 +112,16 @@ public class TemporalAPI extends API {
     @Timed(name = "temporal-query")
     @Produces(APPLICATION_JSON_WITH_CHARSET)
     @RolesAllowed({"space_member", "$owner=$graph $action=vertex_read"})
-    public List<TemporalIntervalResult> query(@Context GraphManager manager,
-                                              @PathParam("graphspace") String graphSpace,
-                                              @PathParam("graph") String graph,
-                                              @QueryParam("temporal_label") String temporalLabel,
-                                              @QueryParam("type") String type,
-                                              @QueryParam("from") String from,
-                                              @QueryParam("to") String to,
-                                              @QueryParam("fact_key") String factKey) {
+    public Response query(@Context GraphManager manager,
+                          @PathParam("graphspace") String graphSpace,
+                          @PathParam("graph") String graph,
+                          @QueryParam("temporal_label") String temporalLabel,
+                          @QueryParam("type") String type,
+                          @QueryParam("from") String from,
+                          @QueryParam("to") String to,
+                          @QueryParam("fact_key") String factKey,
+                          @QueryParam("limit") String limit,
+                          @QueryParam("page_token") String pageToken) {
         E.checkArgument(temporalLabel != null && !temporalLabel.isEmpty(),
                         "The temporal_label can't be null or empty");
         E.checkArgument(factKey != null && !factKey.isEmpty(),
@@ -125,6 +130,22 @@ public class TemporalAPI extends API {
                         "The from time can't be null or empty");
         long fromTime = TemporalTime.parse(from);
         Long toTime = (to == null || to.isEmpty()) ? null : TemporalTime.parse(to);
+        // Phase 4 (additive, optional): a client-side page cap and an opaque
+        // resume cursor. Absent values keep the pre-Phase-4 single-page behavior
+        // and an unchanged JSON body; the next-page cursor (when any) and the
+        // scanned-row count come back as response headers, never in the body.
+        long limitValue = 0L;
+        if (limit != null && !limit.isEmpty()) {
+            try {
+                limitValue = Long.parseLong(limit.trim());
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("The limit must be a number: " + limit);
+            }
+            E.checkArgument(limitValue >= 0, "The limit can't be negative");
+        }
+        byte[] cursor = (pageToken == null || pageToken.isEmpty())
+                        ? new byte[0]
+                        : Base64.getUrlDecoder().decode(pageToken);
         // The fact_key is a JSON object of schema dimensions; parse it and
         // rebuild the canonical bytes from its dimension order.
         @SuppressWarnings("unchecked")
@@ -146,9 +167,21 @@ public class TemporalAPI extends API {
             default:
                 throw new IllegalArgumentException("unknown temporal query type: " + type);
         }
+        query = query.withPage(limitValue, cursor);
 
         HugeGraph g = graph(manager, graphSpace, graph);
-        return g.temporalQuery(parsed, query);
+        TemporalQueryPage page = g.temporalQuery(parsed, query);
+        List<TemporalIntervalResult> intervals = page.intervals();
+        Response.ResponseBuilder builder = Response.ok(intervals);
+        if (page.hasMore()) {
+            builder.header("next_page_token",
+                           Base64.getUrlEncoder().withoutPadding()
+                                 .encodeToString(page.nextPageToken()));
+        }
+        // Scan-amplification observability for the frozen §5.4 gate, exposed as
+        // an additive response header so the JSON body stays a bare interval list.
+        builder.header("scanned_rows", page.scannedRows());
+        return builder.build();
     }
 
     /**

@@ -16,9 +16,14 @@
  */
 package org.apache.hugegraph.unit.core;
 
+import java.util.Collections;
+import java.util.List;
+
 import org.apache.hugegraph.temporal.TemporalGranularity;
 import org.apache.hugegraph.temporal.TemporalInterval;
 import org.apache.hugegraph.temporal.TemporalQuery;
+import org.apache.hugegraph.temporal.store.TemporalIntervalResult;
+import org.apache.hugegraph.temporal.store.TemporalQueryPage;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.unit.BaseUnitTest;
 import org.junit.Test;
@@ -46,5 +51,52 @@ public class TemporalQueryTest extends BaseUnitTest {
                 TemporalQuery.between(100L, 100L));
         Assert.assertThrows(IllegalArgumentException.class, () ->
                 TemporalQuery.overlap(200L, 100L));
+    }
+
+    @Test
+    public void testWithPageCarriesLimitAndCursor() {
+        // Defaults keep the pre-Phase-4 behavior: no cap, empty cursor.
+        TemporalQuery base = TemporalQuery.between(100L, 200L);
+        Assert.assertEquals(0L, base.limit());
+        Assert.assertEquals(0, base.pageToken().length);
+        Assert.assertFalse(base.hasPageToken());
+
+        byte[] cursor = new byte[]{0, 0, 0, 0, 0, 0, 0, 100};
+        TemporalQuery paged = base.withPage(10L, cursor);
+        // The type and window are preserved; only the page fields are added.
+        Assert.assertEquals(TemporalQuery.Type.BETWEEN, paged.type());
+        Assert.assertEquals(100L, paged.from());
+        Assert.assertEquals(200L, paged.to().longValue());
+        Assert.assertEquals(10L, paged.limit());
+        Assert.assertTrue(paged.hasPageToken());
+        Assert.assertArrayEquals(cursor, paged.pageToken());
+
+        // withPage returns a copy; the source query stays immutable.
+        Assert.assertEquals(0L, base.limit());
+        Assert.assertFalse(base.hasPageToken());
+    }
+
+    @Test
+    public void testWithPageRejectsNegativeLimit() {
+        Assert.assertThrows(IllegalArgumentException.class, () ->
+                TemporalQuery.between(100L, 200L).withPage(-1L, new byte[0]));
+    }
+
+    @Test
+    public void testQueryPageExposesIntervalsCursorAndScannedRows() {
+        List<TemporalIntervalResult> intervals = Collections.singletonList(
+                new TemporalIntervalResult(new byte[0], 100L, 200L, 7L));
+        TemporalQueryPage page = new TemporalQueryPage(intervals,
+                                                       new byte[]{1, 2, 3}, 42L);
+        Assert.assertEquals(1, page.intervals().size());
+        Assert.assertEquals(42L, page.scannedRows());
+        Assert.assertTrue(page.hasMore());
+        Assert.assertArrayEquals(new byte[]{1, 2, 3}, page.nextPageToken());
+
+        // An empty cursor means the result set is complete.
+        TemporalQueryPage last = TemporalQueryPage.of(intervals);
+        Assert.assertFalse(last.hasMore());
+        Assert.assertEquals(0, last.nextPageToken().length);
+        Assert.assertEquals(0L, last.scannedRows());
     }
 }

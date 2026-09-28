@@ -272,12 +272,13 @@ public class NodeTxSessionProxy implements HgStoreSession {
 
     @Override
     public TemporalQueryRes temporalQuery(byte[] factKey, TemporalQueryType type,
-                                          long from, long to) {
+                                          long from, long to, long limit,
+                                          byte[] pageToken) {
         int code = PartitionUtils.calcHashcode(factKey);
         Collection<HgNodePartition> nodes = this.doPartition("", code, code);
         return nodes.stream()
                     .map(e -> this.getStoreNode(e.getNodeId()).openSession(this.graphName)
-                                  .temporalQuery(factKey, type, from, to))
+                                  .temporalQuery(factKey, type, from, to, limit, pageToken))
                     .findFirst().orElse(null);
     }
 

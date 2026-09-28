@@ -17,12 +17,10 @@
 
 package org.apache.hugegraph.backend.store;
 
-import java.util.List;
-
 import org.apache.hugegraph.temporal.TemporalQuery;
 import org.apache.hugegraph.temporal.store.TemporalErrorCode;
 import org.apache.hugegraph.temporal.store.TemporalFactKey;
-import org.apache.hugegraph.temporal.store.TemporalIntervalResult;
+import org.apache.hugegraph.temporal.store.TemporalQueryPage;
 import org.apache.hugegraph.temporal.store.TemporalStoreException;
 import org.apache.hugegraph.temporal.store.TemporalWrite;
 
@@ -60,10 +58,14 @@ public interface TemporalBackendStore extends BackendStore {
     /**
      * Fact-scoped temporal read ({@code as_of} / {@code between} /
      * {@code overlap}). The fact key identifies the fact sequence; the returned
-     * intervals carry only the valid-time window and committed revision, the
-     * caller already holds the entity label / temporal label / granularity.
+     * page carries the intervals of this page (only the valid-time window and
+     * committed revision, the caller already holds the entity label / temporal
+     * label / granularity), the opaque cursor of the next page and the scanned
+     * row count. Phase 4 pagination is driven by {@link TemporalQuery#limit()}
+     * and {@link TemporalQuery#pageToken()}; unset values keep the pre-Phase-4
+     * single-page behavior.
      */
-    List<TemporalIntervalResult> temporalQuery(TemporalFactKey factKey, TemporalQuery query);
+    TemporalQueryPage temporalQuery(TemporalFactKey factKey, TemporalQuery query);
 
     /**
      * Cast {@code store} to a temporal-capable store or fail explicitly.

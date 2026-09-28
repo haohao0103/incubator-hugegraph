@@ -177,17 +177,25 @@ public class HgStoreSessionImpl extends HgStoreSessionGrpc.HgStoreSessionImplBas
         TemporalQueryHandler handler = getTemporalQueryHandler();
         TemporalQueryHandler.ScanStats stats = new TemporalQueryHandler.ScanStats();
 
+        long limit = request.getLimit();
+        long cursor = decodeCursor(request.getPageToken().toByteArray());
+
         List<TemporalIntervalRow> rows;
+        long nextCursor = TemporalQueryHandler.NO_CURSOR;
         switch (request.getType()) {
             case TEMPORAL_QUERY_AS_OF:
+                // as_of resolves to at most one interval; pagination is N/A.
                 rows = handler.asOf(graph, factKey, request.getFrom(), stats);
                 break;
             case TEMPORAL_QUERY_BETWEEN:
-                rows = handler.between(graph, factKey, request.getFrom(), request.getTo(), stats);
+            case TEMPORAL_QUERY_OVERLAP: {
+                TemporalQueryHandler.Page page = handler.rangePage(
+                        graph, factKey, request.getFrom(), request.getTo(),
+                        limit, cursor, stats);
+                rows = page.rows();
+                nextCursor = page.nextCursor();
                 break;
-            case TEMPORAL_QUERY_OVERLAP:
-                rows = handler.overlap(graph, factKey, request.getFrom(), request.getTo(), stats);
-                break;
+            }
             default:
                 rows = java.util.Collections.emptyList();
                 break;
@@ -214,7 +222,11 @@ public class HgStoreSessionImpl extends HgStoreSessionGrpc.HgStoreSessionImplBas
         }
 
         TemporalQueryRes.Builder builder = TemporalQueryRes.newBuilder()
-                                                          .setStatus(HgGrpc.success());
+                                                          .setStatus(HgGrpc.success())
+                                                          .setScannedRows(stats.scannedRows());
+        if (nextCursor != TemporalQueryHandler.NO_CURSOR) {
+            builder.setNextPageToken(ByteString.copyFrom(encodeCursor(nextCursor)));
+        }
         for (TemporalIntervalRow row : rows) {
             builder.addInterval(TemporalInterval.newBuilder()
                     .setFactKey(ByteString.copyFrom(row.factKey()))
@@ -226,6 +238,33 @@ public class HgStoreSessionImpl extends HgStoreSessionGrpc.HgStoreSessionImplBas
         }
         responseObserver.onNext(builder.build());
         responseObserver.onCompleted();
+    }
+
+    /**
+     * Encode a temporal pagination cursor (a {@code valid_from}) as opaque
+     * big-endian bytes. The bytes round-trip unchanged through
+     * Store -&gt; Server -&gt; REST (base64) -&gt; client and back, so the Store
+     * is the only place that interprets them.
+     */
+    private static byte[] encodeCursor(long cursor) {
+        return java.nio.ByteBuffer.allocate(Long.BYTES).putLong(cursor).array();
+    }
+
+    /**
+     * Decode an opaque {@code page_token} back to a cursor. An empty token means
+     * "first page" ({@link TemporalQueryHandler#NO_CURSOR}); a malformed length
+     * is rejected explicitly rather than silently treated as the first page.
+     */
+    private static long decodeCursor(byte[] pageToken) {
+        if (pageToken == null || pageToken.length == 0) {
+            return TemporalQueryHandler.NO_CURSOR;
+        }
+        if (pageToken.length != Long.BYTES) {
+            throw new IllegalArgumentException(
+                    "malformed temporal page_token: expected " + Long.BYTES +
+                    " bytes, got " + pageToken.length);
+        }
+        return java.nio.ByteBuffer.wrap(pageToken).getLong();
     }
 
     @Override

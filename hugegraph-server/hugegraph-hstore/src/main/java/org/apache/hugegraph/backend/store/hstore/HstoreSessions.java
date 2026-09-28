@@ -221,6 +221,7 @@ public abstract class HstoreSessions extends BackendSessionPool {
          */
         public abstract TemporalQueryRes temporalQuery(byte[] factKey,
                                                        TemporalQueryType type,
-                                                       long from, long to);
+                                                       long from, long to,
+                                                       long limit, byte[] pageToken);
     }
 }

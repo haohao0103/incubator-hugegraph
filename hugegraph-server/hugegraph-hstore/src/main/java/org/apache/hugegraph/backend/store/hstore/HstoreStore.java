@@ -726,17 +726,23 @@ public abstract class HstoreStore extends AbstractBackendStore<Session>
     }
 
     @Override
-    public java.util.List<org.apache.hugegraph.temporal.store.TemporalIntervalResult>
+    public org.apache.hugegraph.temporal.store.TemporalQueryPage
     temporalQuery(org.apache.hugegraph.temporal.store.TemporalFactKey factKey,
                   org.apache.hugegraph.temporal.TemporalQuery query) {
         this.checkOpened();
         org.apache.hugegraph.store.grpc.session.TemporalQueryType type = toProtoType(query);
         long to = query.to() == null ? 0L : query.to();
+        // Phase 4: thread the client-side page cap and resume cursor down to the
+        // Store; the response carries the next-page cursor and the scanned-row
+        // count so the REST layer can expose pagination and scan amplification.
         org.apache.hugegraph.store.grpc.session.TemporalQueryRes res =
                 this.sessions.session().temporalQuery(factKey.canonicalBytes(),
-                                                      type, query.from(), to);
+                                                      type, query.from(), to,
+                                                      query.limit(), query.pageToken());
         java.util.List<org.apache.hugegraph.temporal.store.TemporalIntervalResult> rows =
                 new java.util.ArrayList<>();
+        byte[] nextPageToken = new byte[0];
+        long scannedRows = 0L;
         if (res != null) {
             for (org.apache.hugegraph.store.grpc.session.TemporalInterval interval :
                     res.getIntervalList()) {
@@ -746,8 +752,11 @@ public abstract class HstoreStore extends AbstractBackendStore<Session>
                         interval.getOpen() ? null : interval.getValidTo(),
                         interval.getCommittedRevision()));
             }
+            nextPageToken = res.getNextPageToken().toByteArray();
+            scannedRows = res.getScannedRows();
         }
-        return rows;
+        return new org.apache.hugegraph.temporal.store.TemporalQueryPage(
+                rows, nextPageToken, scannedRows);
     }
 
     private static org.apache.hugegraph.store.grpc.session.TemporalQueryType toProtoType(

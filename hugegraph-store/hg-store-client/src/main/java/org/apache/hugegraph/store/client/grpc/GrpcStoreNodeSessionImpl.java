@@ -312,8 +312,10 @@ class GrpcStoreNodeSessionImpl implements HgStoreNodeSession {
 
     @Override
     public TemporalQueryRes temporalQuery(byte[] factKey, TemporalQueryType type,
-                                          long from, long to) {
-        return this.storeSessionClient.doTemporalQuery(this, factKey, type, from, to);
+                                          long from, long to, long limit,
+                                          byte[] pageToken) {
+        return this.storeSessionClient.doTemporalQuery(this, factKey, type, from, to,
+                                                       limit, pageToken);
     }
 
     @Override

@@ -34,6 +34,8 @@ import org.junit.Test;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
@@ -314,6 +316,138 @@ public class TemporalQueryHandlerTest {
         } catch (HgStoreException e) {
             assertEquals(HgStoreException.EC_TEMPORAL_QUERY_LIMIT_EXCEEDED, e.getCode());
         }
+    }
+
+    // ------------------------------------------------- rangePage / pagination
+
+    @Test
+    public void shouldRangePageRespectLimitAndReturnCursor() {
+        BusinessHandler business = mock(BusinessHandler.class);
+        byte[] factKey = bytes("fact");
+        when(business.scanPrefix(anyString(), anyInt(), anyString(), any()))
+                .thenAnswer(scanAnswer(marker(factKey, 100L, 150L, 1L),
+                                       marker(factKey, 200L, 250L, 2L),
+                                       marker(factKey, 300L, 350L, 3L)));
+
+        TemporalQueryHandler query = new TemporalQueryHandler(business);
+        TemporalQueryHandler.Page page = query.rangePage(
+                "g", factKey, 0L, 600L, 2L, TemporalQueryHandler.NO_CURSOR,
+                new TemporalQueryHandler.ScanStats());
+
+        assertEquals(2, page.rows().size());
+        assertEquals(100L, page.rows().get(0).validFrom());
+        assertEquals(200L, page.rows().get(1).validFrom());
+        // The cursor advances to the last returned valid_from; more remains.
+        assertEquals(200L, page.nextCursor());
+        assertTrue(page.hasMore());
+    }
+
+    @Test
+    public void shouldRangePageResumeStrictlyAfterCursor() {
+        BusinessHandler business = mock(BusinessHandler.class);
+        byte[] factKey = bytes("fact");
+        when(business.scanPrefix(anyString(), anyInt(), anyString(), any()))
+                .thenAnswer(scanAnswer(marker(factKey, 100L, 150L, 1L),
+                                       marker(factKey, 200L, 250L, 2L),
+                                       marker(factKey, 300L, 350L, 3L)));
+
+        TemporalQueryHandler query = new TemporalQueryHandler(business);
+        // Resume after valid_from 200: only [300,350) is new and the set ends.
+        TemporalQueryHandler.Page page = query.rangePage(
+                "g", factKey, 0L, 600L, 2L, 200L,
+                new TemporalQueryHandler.ScanStats());
+
+        assertEquals(1, page.rows().size());
+        assertEquals(300L, page.rows().get(0).validFrom());
+        assertEquals(TemporalQueryHandler.NO_CURSOR, page.nextCursor());
+        assertFalse(page.hasMore());
+    }
+
+    @Test
+    public void shouldRangePageFullWalkCoverEachRowExactlyOnce() {
+        BusinessHandler business = mock(BusinessHandler.class);
+        byte[] factKey = bytes("fact");
+        when(business.scanPrefix(anyString(), anyInt(), anyString(), any()))
+                .thenAnswer(scanAnswer(marker(factKey, 100L, 150L, 1L),
+                                       marker(factKey, 200L, 250L, 2L),
+                                       marker(factKey, 300L, 350L, 3L)));
+
+        TemporalQueryHandler query = new TemporalQueryHandler(business);
+        List<Long> seen = new ArrayList<>();
+        long cursor = TemporalQueryHandler.NO_CURSOR;
+        int pages = 0;
+        do {
+            TemporalQueryHandler.Page page = query.rangePage(
+                    "g", factKey, 0L, 600L, 1L, cursor,
+                    new TemporalQueryHandler.ScanStats());
+            for (TemporalIntervalRow row : page.rows()) {
+                seen.add(row.validFrom());
+            }
+            cursor = page.nextCursor();
+            pages++;
+            assertTrue("pagination must terminate", pages <= 10);
+        } while (cursor != TemporalQueryHandler.NO_CURSOR);
+
+        // Exactly the three valid_from values, ascending, no dup and no skip.
+        assertEquals(Arrays.asList(100L, 200L, 300L), seen);
+        assertEquals(3, pages);
+    }
+
+    @Test
+    public void shouldRangePageNoLimitReturnAllInOnePage() {
+        BusinessHandler business = mock(BusinessHandler.class);
+        byte[] factKey = bytes("fact");
+        when(business.scanPrefix(anyString(), anyInt(), anyString(), any()))
+                .thenAnswer(scanAnswer(marker(factKey, 100L, 150L, 1L),
+                                       marker(factKey, 200L, 250L, 2L),
+                                       marker(factKey, 300L, 350L, 3L)));
+
+        TemporalQueryHandler query = new TemporalQueryHandler(business);
+        // limit <= 0 means "no client cap": the whole bounded set in one page.
+        TemporalQueryHandler.Page page = query.rangePage(
+                "g", factKey, 0L, 600L, 0L, TemporalQueryHandler.NO_CURSOR,
+                new TemporalQueryHandler.ScanStats());
+
+        assertEquals(3, page.rows().size());
+        assertFalse(page.hasMore());
+        assertEquals(TemporalQueryHandler.NO_CURSOR, page.nextCursor());
+    }
+
+    @Test
+    public void shouldRangePageExhaustedAtMaxCursor() {
+        BusinessHandler business = mock(BusinessHandler.class);
+        byte[] factKey = bytes("fact");
+        when(business.scanPrefix(anyString(), anyInt(), anyString(), any()))
+                .thenAnswer(scanAnswer(marker(factKey, 100L, 150L, 1L)));
+
+        TemporalQueryHandler query = new TemporalQueryHandler(business);
+        // No valid_from can exceed Long.MAX_VALUE, so the set is already done.
+        TemporalQueryHandler.Page page = query.rangePage(
+                "g", factKey, 0L, 600L, 2L, Long.MAX_VALUE,
+                new TemporalQueryHandler.ScanStats());
+
+        assertTrue(page.rows().isEmpty());
+        assertFalse(page.hasMore());
+    }
+
+    @Test
+    public void shouldRangePageRecordScanStats() {
+        BusinessHandler business = mock(BusinessHandler.class);
+        byte[] factKey = bytes("fact");
+        when(business.scanPrefix(anyString(), anyInt(), anyString(), any()))
+                .thenAnswer(scanAnswer(marker(factKey, 100L, 150L, 1L),
+                                       marker(factKey, 200L, 250L, 2L)));
+
+        TemporalQueryHandler query = new TemporalQueryHandler(business);
+        TemporalQueryHandler.ScanStats stats = new TemporalQueryHandler.ScanStats();
+        TemporalQueryHandler.Page page = query.rangePage(
+                "g", factKey, 0L, 600L, 0L, TemporalQueryHandler.NO_CURSOR, stats);
+
+        assertEquals(2, page.rows().size());
+        // The page exposes the same collector the caller passed in, so the
+        // scanned-vs-returned ratio is measurable for the frozen §5.4 gate.
+        assertSame(stats, page.stats());
+        assertTrue(stats.scannedRows() >= page.rows().size());
     }
 
     // ----------------------------------------------------- append -> as_of loop

@@ -71,6 +71,14 @@ public final class TemporalQueryHandler {
     /** ~19 years of 7-day buckets, the bound on the cross-bucket walk-back. */
     private static final long DEFAULT_MAX_BUCKETS = 1024L;
 
+    /**
+     * Sentinel pagination cursor: {@code NO_CURSOR} as an input means "first
+     * page"; as {@link Page#nextCursor()} it means the result set is complete.
+     * A real {@code valid_from} can never equal {@link Long#MIN_VALUE}, so the
+     * sentinel is unambiguous.
+     */
+    public static final long NO_CURSOR = Long.MIN_VALUE;
+
     private final BusinessHandler businessHandler;
     private final long maxScanRows;
     private final long maxBuckets;
@@ -236,6 +244,45 @@ public final class TemporalQueryHandler {
         return result;
     }
 
+    /**
+     * Paged fact-scoped range query (Phase 4). Returns up to {@code limit}
+     * intervals whose {@code valid_from} is strictly after {@code cursor}, in
+     * ascending {@code valid_from} order, plus the cursor of the next page
+     * ({@link #NO_CURSOR} when the result set is complete).
+     *
+     * <p>Pagination keeps the same {@code [from, to)} window and advances by
+     * {@code valid_from}. Under the fact-key non-overlap invariant
+     * {@code valid_from} is unique per fact key, so the cursor is exact (no row
+     * is skipped or duplicated across pages). The scan lower bound is narrowed
+     * to {@code cursor + 1} so later pages do not re-scan already-returned
+     * history; the absolute scan stays capped by {@code maxScanRows}/
+     * {@code maxBuckets}. {@code limit <= 0} means "no client cap" and returns
+     * the whole (still bounded) matching set in one page.</p>
+     */
+    public Page rangePage(String graph, byte[] factKey, long from, long to,
+                          long limit, long cursor, ScanStats stats) {
+        if (cursor != NO_CURSOR && cursor == Long.MAX_VALUE) {
+            // No valid_from can exceed the maximum cursor; the set is exhausted.
+            return new Page(Collections.emptyList(), NO_CURSOR, stats);
+        }
+        long effectiveFrom = cursor == NO_CURSOR ? from : Math.max(from, cursor + 1);
+        List<TemporalIntervalRow> matched = range(graph, factKey, effectiveFrom, to, stats);
+        List<TemporalIntervalRow> eligible = new ArrayList<>();
+        for (TemporalIntervalRow row : matched) {
+            if (cursor != NO_CURSOR && row.validFrom() <= cursor) {
+                continue; // already returned by a previous page
+            }
+            eligible.add(row);
+        }
+        if (limit > 0 && eligible.size() > limit) {
+            List<TemporalIntervalRow> page =
+                    new ArrayList<>(eligible.subList(0, (int) limit));
+            long nextCursor = page.get(page.size() - 1).validFrom();
+            return new Page(page, nextCursor, stats);
+        }
+        return new Page(eligible, NO_CURSOR, stats);
+    }
+
     /** Scan one bucket (or the open sentinel bucket) of one fact sequence. */
     private List<TemporalIntervalRow> scanBucket(String graph, byte[] factKey, int code,
                                                  long bucket, ScanBudget budget) {
@@ -329,6 +376,44 @@ public final class TemporalQueryHandler {
                 return this.scannedRows;
             }
             return (double) this.scannedRows / returnedRows;
+        }
+    }
+
+    /**
+     * One page of a paged fact-scoped range query: the intervals of this page,
+     * the cursor to resume with ({@link #NO_CURSOR} when complete), and the scan
+     * amplification recorded while producing the page.
+     */
+    public static final class Page {
+
+        private final List<TemporalIntervalRow> rows;
+        private final long nextCursor;
+        private final ScanStats stats;
+
+        Page(List<TemporalIntervalRow> rows, long nextCursor, ScanStats stats) {
+            this.rows = rows;
+            this.nextCursor = nextCursor;
+            this.stats = stats;
+        }
+
+        /** The intervals of this page, ascending by {@code valid_from}. */
+        public List<TemporalIntervalRow> rows() {
+            return this.rows;
+        }
+
+        /** Cursor for the next page, or {@link #NO_CURSOR} if complete. */
+        public long nextCursor() {
+            return this.nextCursor;
+        }
+
+        /** True when more pages remain after this one. */
+        public boolean hasMore() {
+            return this.nextCursor != NO_CURSOR;
+        }
+
+        /** Scan amplification recorded for this page (may be a no-op collector). */
+        public ScanStats stats() {
+            return this.stats;
         }
     }
 

@@ -61,7 +61,7 @@ import org.apache.hugegraph.backend.store.BackendStore;
 import org.apache.hugegraph.backend.store.TemporalBackendStore;
 import org.apache.hugegraph.temporal.TemporalQuery;
 import org.apache.hugegraph.temporal.store.TemporalFactKey;
-import org.apache.hugegraph.temporal.store.TemporalIntervalResult;
+import org.apache.hugegraph.temporal.store.TemporalQueryPage;
 import org.apache.hugegraph.temporal.store.TemporalWrite;
 import org.apache.hugegraph.config.CoreOptions;
 import org.apache.hugegraph.config.HugeConfig;
@@ -594,11 +594,12 @@ public class GraphTransaction extends IndexableTransaction {
     /**
      * Fact-scoped temporal read ({@code as_of} / {@code between} /
      * {@code overlap}). The fact key identifies the fact sequence; the returned
-     * intervals carry the valid-time window and committed revision. Requires a
-     * temporal-capable backend.
+     * page carries the intervals (valid-time window and committed revision), the
+     * next-page cursor and the scanned-row count. Requires a temporal-capable
+     * backend.
      */
-    public List<TemporalIntervalResult> temporalQuery(TemporalFactKey factKey,
-                                                      TemporalQuery query) {
+    public TemporalQueryPage temporalQuery(TemporalFactKey factKey,
+                                           TemporalQuery query) {
         E.checkNotNull(factKey, "factKey");
         E.checkNotNull(query, "query");
         this.beforeRead();
