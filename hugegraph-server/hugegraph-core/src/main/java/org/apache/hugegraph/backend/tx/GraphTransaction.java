@@ -566,11 +566,7 @@ public class GraphTransaction extends IndexableTransaction {
         if (this.pendingTemporalWrites.isEmpty()) {
             return;
         }
-        TemporalBackendStore store = TemporalBackendStore.require(this.store());
-        for (TemporalWrite.Request request : this.pendingTemporalWrites) {
-            store.temporalMutate(request);
-        }
-        this.pendingTemporalWrites.clear();
+        dispatchPendingTemporalWrites();
     }
 
     /** Dispatch accumulated temporal writes outside a backend tx (standalone). */
@@ -578,11 +574,51 @@ public class GraphTransaction extends IndexableTransaction {
         if (this.pendingTemporalWrites.isEmpty()) {
             return;
         }
-        TemporalBackendStore store = TemporalBackendStore.require(this.store());
-        for (TemporalWrite.Request request : this.pendingTemporalWrites) {
-            store.temporalMutate(request);
+        dispatchPendingTemporalWrites();
+    }
+
+    /**
+     * Dispatch every accumulated temporal write and ALWAYS drop the list
+     * afterwards, success or failure. The transaction instance is reused across
+     * requests on the same thread (TinkerPopTransaction thread-local), so a
+     * request rejected by the Store must not leave its bundle behind: the next
+     * request on this thread would replay it, get it rejected again, and be
+     * reported the stale request's error (verification §10.3 ghost replay).
+     * A failed flush drops its request's undispatched writes as a whole, so a
+     * request answered with an error never silently persists a partial subset;
+     * the client can retry each mutation with its original mutation_id. The
+     * capability check is part of the guarded region: it can only fail for a
+     * transaction whose store lost temporal capability, and that failure must
+     * drop the list too.
+     */
+    private void dispatchPendingTemporalWrites() {
+        try {
+            TemporalBackendStore store = TemporalBackendStore.require(this.store());
+            for (TemporalWrite.Request request : this.pendingTemporalWrites) {
+                store.temporalMutate(request);
+            }
+        } catch (RuntimeException | Error e) {
+            if (this.pendingTemporalWrites.size() > 1) {
+                LOG.warn("temporal flush aborted after a rejected write; dropping " +
+                         "{} pending write(s) to keep the reused transaction clean",
+                         this.pendingTemporalWrites.size(), e);
+            }
+            throw e;
+        } finally {
+            this.pendingTemporalWrites.clear();
         }
+    }
+
+    /**
+     * Failure hook: a backend commit that failed (or a rollback while
+     * committing) must also drop the accumulated temporal writes, otherwise the
+     * next request reusing this thread-local transaction would replay them
+     * (verification §10.3).
+     */
+    @Override
+    protected void rollbackBackend() {
         this.pendingTemporalWrites.clear();
+        super.rollbackBackend();
     }
 
     /**
@@ -607,6 +643,9 @@ public class GraphTransaction extends IndexableTransaction {
 
     @Override
     public void rollback() throws BackendException {
+        // A failed request must not leave temporal writes behind for the next
+        // request reusing this thread-local transaction (verification §10.3).
+        this.pendingTemporalWrites.clear();
         // Rollback properties changes
         for (HugeProperty<?> prop : this.updatedOldestProps) {
             prop.element().setProperty(prop);

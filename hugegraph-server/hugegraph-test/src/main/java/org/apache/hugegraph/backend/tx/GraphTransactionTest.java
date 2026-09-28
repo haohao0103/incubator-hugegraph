@@ -19,6 +19,7 @@ package org.apache.hugegraph.backend.tx;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 import org.apache.hugegraph.HugeFactory;
@@ -37,6 +38,8 @@ import org.apache.hugegraph.backend.tx.GraphIndexTransaction.RemoveLeftIndexJob;
 import org.apache.hugegraph.job.EphemeralJob;
 import org.apache.hugegraph.schema.VertexLabel;
 import org.apache.hugegraph.structure.HugeVertex;
+import org.apache.hugegraph.temporal.store.TemporalFactKey;
+import org.apache.hugegraph.temporal.store.TemporalWrite;
 import org.apache.hugegraph.testutil.Assert;
 import org.apache.hugegraph.testutil.Whitebox;
 import org.apache.hugegraph.type.HugeType;
@@ -156,6 +159,87 @@ public class GraphTransactionTest {
             Assert.assertTrue(query.existLeftIndex(fixture.vertex.id()));
             fixture.assertCleanup(query);
         }
+    }
+
+    @Test
+    public void testRejectedTemporalFlushDropsPendingWrites() throws Exception {
+        // Verification §10.3: a rejected temporal flush must drop its pending
+        // writes, otherwise a later request reusing this thread-local
+        // transaction would replay them (ghost replay + misattributed error).
+        HugeGraph graph = HugeFactory.open(FakeObjects.newConfig());
+        try {
+            GraphTransaction tx = openTransaction(graph);
+            List<TemporalWrite.Request> pending = Whitebox.getInternalState(
+                    tx, "pendingTemporalWrites");
+            pending.add(newTemporalRequest(graph));
+
+            // The memory fixture store is not temporal-capable, so the flush is
+            // rejected on the capability check; the pending write must still go.
+            try {
+                tx.flushPendingTemporalWrites();
+                Assert.fail("The flush must be rejected by a non-temporal store");
+            } catch (Exception expected) {
+                // expected: TEMPORAL_UNSUPPORTED_VERSION
+            }
+            Assert.assertTrue(pending.isEmpty());
+        } finally {
+            graph.clearBackend();
+            graph.close();
+        }
+    }
+
+    @Test
+    public void testRollbackDropsPendingTemporalWrites() throws Exception {
+        HugeGraph graph = HugeFactory.open(FakeObjects.newConfig());
+        try {
+            GraphTransaction tx = openTransaction(graph);
+            List<TemporalWrite.Request> pending = Whitebox.getInternalState(
+                    tx, "pendingTemporalWrites");
+            pending.add(newTemporalRequest(graph));
+
+            tx.rollback();
+            Assert.assertTrue(pending.isEmpty());
+        } finally {
+            graph.clearBackend();
+            graph.close();
+        }
+    }
+
+    @Test
+    public void testBackendRollbackDropsPendingTemporalWrites() throws Exception {
+        HugeGraph graph = HugeFactory.open(FakeObjects.newConfig());
+        try {
+            GraphTransaction tx = openTransaction(graph);
+            List<TemporalWrite.Request> pending = Whitebox.getInternalState(
+                    tx, "pendingTemporalWrites");
+            pending.add(newTemporalRequest(graph));
+
+            try {
+                tx.rollbackBackend();
+                Assert.fail("The in-memory store doesn't support rollbackTx");
+            } catch (UnsupportedOperationException expected) {
+                // The fixture store rejects rollbackTx, yet the pending list
+                // must already have been dropped before delegating.
+            }
+            Assert.assertTrue(pending.isEmpty());
+        } finally {
+            graph.clearBackend();
+            graph.close();
+        }
+    }
+
+    private static GraphTransaction openTransaction(HugeGraph graph) {
+        HugeGraphParams params = Whitebox.getInternalState(graph, "params");
+        return params.openTransaction();
+    }
+
+    private static TemporalWrite.Request newTemporalRequest(HugeGraph graph) {
+        TemporalFactKey factKey = TemporalFactKey.of(
+                Arrays.asList("city"),
+                Collections.singletonMap("city", "shenzhen"));
+        return TemporalWrite.Request.append(graph.name(), "weather", "e1",
+                                            factKey, 1000L, null, "p",
+                                            "m-residue");
     }
 
     private static final class FilterFixture implements AutoCloseable {
