@@ -39,6 +39,8 @@ import org.apache.hugegraph.backend.store.BackendEntry.BackendColumnIterator;
 import org.apache.hugegraph.backend.store.BackendEntryIterator;
 import org.apache.hugegraph.store.HgOwnerKey;
 import org.apache.hugegraph.store.client.util.HgStoreClientConst;
+import org.apache.hugegraph.store.grpc.session.TemporalQueryRes;
+import org.apache.hugegraph.store.grpc.session.TemporalQueryType;
 import org.apache.hugegraph.type.HugeType;
 import org.apache.hugegraph.type.define.Directions;
 import org.apache.hugegraph.type.define.GraphMode;
@@ -437,6 +439,19 @@ public class HstoreTableTest {
         @Override
         public int getActiveStoreSize() {
             return 0;
+        }
+
+        @Override
+        public void temporalMutate(int code, byte[] bundle) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public TemporalQueryRes temporalQuery(byte[] factKey,
+                                              TemporalQueryType type,
+                                              long from, long to, long limit,
+                                              byte[] pageToken) {
+            throw new UnsupportedOperationException();
         }
     }
 
