@@ -1,0 +1,537 @@
+{
+  "argv": [
+    "cv_perf_driver.py",
+    "--out-dir",
+    "results",
+    "prepare",
+    "--label",
+    "perf-multi",
+    "--entity-prefix",
+    "perf-multi",
+    "--entities",
+    "100",
+    "--intervals",
+    "100",
+    "--writers",
+    "8",
+    "--tag",
+    "prep-multi"
+  ],
+  "extra": {
+    "verify": [
+      {
+        "entity": "perf-multi-1",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-2",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-3",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-4",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-5",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-6",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-7",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-8",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-9",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-10",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-11",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-12",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-13",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-14",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-15",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-16",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-17",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-18",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-19",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-20",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-21",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-22",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-23",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-24",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-25",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-26",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-27",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-28",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-29",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-30",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-31",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-32",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-33",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-34",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-35",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-36",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-37",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-38",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-39",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-40",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-41",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-42",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-43",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-44",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-45",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-46",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-47",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-48",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-49",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-50",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-51",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-52",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-53",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-54",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-55",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-56",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-57",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-58",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-59",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-60",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-61",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-62",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-63",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-64",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-65",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-66",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-67",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-68",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-69",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-70",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-71",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-72",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-73",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-74",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-75",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-76",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-77",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-78",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-79",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-80",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-81",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-82",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-83",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-84",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-85",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-86",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-87",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-88",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-89",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-90",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-91",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-92",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-93",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-94",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-95",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-96",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-97",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-98",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-99",
+        "expected": 100,
+        "got": 100
+      },
+      {
+        "entity": "perf-multi-100",
+        "expected": 100,
+        "got": 100
+      }
+    ]
+  },
+  "finished": "2026-09-28T18:59:50+0800",
+  "mode": "prepare",
+  "summary": {
+    "entities": 100,
+    "error_samples": [],
+    "intervals_per": 100,
+    "mps": 1192.58427844853,
+    "seconds": 8.385151624679565,
+    "verify_ok": true,
+    "wrote_err": 0,
+    "wrote_ok": 10000
+  },
+  "tag": "prep-multi"
+}

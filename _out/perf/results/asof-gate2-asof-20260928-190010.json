@@ -1,0 +1,37 @@
+{
+  "argv": [
+    "cv_perf_driver.py",
+    "--out-dir",
+    "results",
+    "asof",
+    "--label",
+    "perf-asof",
+    "--entity",
+    "perf-asof-1",
+    "--intervals",
+    "1000",
+    "--iters",
+    "10000",
+    "--warmup",
+    "1000",
+    "--concurrency",
+    "1",
+    "--tag",
+    "gate2-asof"
+  ],
+  "extra": {},
+  "finished": "2026-09-28T19:00:10+0800",
+  "mode": "asof",
+  "summary": {
+    "as_of_ms": 1621036800010,
+    "count": 10000,
+    "entity": "perf-asof-1",
+    "iters": 10000,
+    "max": 8.366684913635254,
+    "mean": 0.6988034914016724,
+    "p50": 0.6923206448554993,
+    "p95": 0.7820106118917465,
+    "p99": 0.8682714575529101
+  },
+  "tag": "gate2-asof"
+}

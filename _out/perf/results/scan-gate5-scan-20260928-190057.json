@@ -1,0 +1,1286 @@
+{
+  "argv": [
+    "cv_perf_driver.py",
+    "--out-dir",
+    "results",
+    "scan",
+    "--label",
+    "perf-asof",
+    "--entity",
+    "perf-asof-1",
+    "--intervals",
+    "1000",
+    "--repeats",
+    "50",
+    "--pages",
+    "30",
+    "--tag",
+    "gate5-scan"
+  ],
+  "extra": {
+    "all": [
+      {
+        "amp": 7.0,
+        "ms": 2.612581942230463,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 1.135355094447732,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.8712781127542257,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7758189458400011,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7691490463912487,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.8458548691123724,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7867598906159401,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7475640159100294,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7174939382821321,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7959799841046333,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7574609480798244,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.713458051905036,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.8268940728157759,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7100850343704224,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7552099414169788,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.768889207392931,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7182930130511522,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.753333093598485,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7409730460494757,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7842301856726408,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7431851699948311,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7040950004011393,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.6724600680172443,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.6893849931657314,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7083381060510874,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7165351416915655,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.6873889360576868,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7645138539373875,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7329459767788649,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7309189531952143,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7041790522634983,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7262241560965776,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.6702488753944635,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.6923230830579996,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.632760114967823,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.679998192936182,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.689581036567688,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.6832268554717302,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7182341068983078,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7572139147669077,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.6698060315102339,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.6882238667458296,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7333529647439718,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7114859763532877,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.6067170761525631,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.6490990053862333,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.651543028652668,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.6092691328376532,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.5781108047813177,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.6700139492750168,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 1.0,
+        "ms": 31.447754008695483,
+        "name": "wide_all1000",
+        "pass": true,
+        "returned": 1000,
+        "scanned": 1000
+      },
+      {
+        "amp": 1.0,
+        "ms": 26.83227206580341,
+        "name": "wide_all1000",
+        "pass": true,
+        "returned": 1000,
+        "scanned": 1000
+      },
+      {
+        "amp": 1.0,
+        "ms": 29.624891001731157,
+        "name": "wide_all1000",
+        "pass": true,
+        "returned": 1000,
+        "scanned": 1000
+      },
+      {
+        "amp": 1.0,
+        "ms": 29.403142863884568,
+        "name": "wide_all1000",
+        "pass": true,
+        "returned": 1000,
+        "scanned": 1000
+      },
+      {
+        "amp": 1.0,
+        "ms": 27.934961952269077,
+        "name": "wide_all1000",
+        "pass": true,
+        "returned": 1000,
+        "scanned": 1000
+      },
+      {
+        "amp": 2.1,
+        "ms": 1.102791866287589,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.9605989325791597,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.9003349114209414,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.8550398051738739,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.8385621476918459,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.8553520310670137,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7820471655577421,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7394840940833092,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7861368358135223,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.8601380977779627,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7769011426717043,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7141560781747103,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7653820794075727,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7335881236940622,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7777821738272905,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7880060002207756,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.8291560225188732,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.8772520814090967,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.728905200958252,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.8151181973516941,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7581671234220266,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.8220849558711052,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7759940344840288,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7740259170532227,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7684279698878527,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7480031345039606,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.8022109977900982,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7987709250301123,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7925359532237053,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.8308349642902613,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7953781168907881,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7618959061801434,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.8014410268515348,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7225410081446171,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7466960232704878,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7602937985211611,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7864630315452814,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.836067134514451,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.8194290567189455,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.8208588697016239,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.8920039981603622,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.8449859451502562,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7166808936744928,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7472829893231392,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7117160130292177,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7329599466174841,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7528900168836117,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7237910758703947,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7718289270997047,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 2.1,
+        "ms": 0.7677520625293255,
+        "name": "narrow_10",
+        "pass": true,
+        "returned": 10,
+        "scanned": 21
+      },
+      {
+        "amp": 20.0,
+        "ms": 28.4997820854187,
+        "name": "paged",
+        "pass": false,
+        "returned": 50,
+        "scanned": 1000
+      },
+      {
+        "amp": 19.28,
+        "ms": 5.239709978923202,
+        "name": "paged",
+        "pass": false,
+        "returned": 50,
+        "scanned": 964
+      },
+      {
+        "amp": 18.16,
+        "ms": 4.600815940648317,
+        "name": "paged",
+        "pass": false,
+        "returned": 50,
+        "scanned": 908
+      },
+      {
+        "amp": 17.18,
+        "ms": 4.405002109706402,
+        "name": "paged",
+        "pass": false,
+        "returned": 50,
+        "scanned": 859
+      },
+      {
+        "amp": 16.2,
+        "ms": 4.045590991154313,
+        "name": "paged",
+        "pass": false,
+        "returned": 50,
+        "scanned": 810
+      },
+      {
+        "amp": 15.22,
+        "ms": 3.9392299950122833,
+        "name": "paged",
+        "pass": false,
+        "returned": 50,
+        "scanned": 761
+      },
+      {
+        "amp": 14.24,
+        "ms": 3.780241822823882,
+        "name": "paged",
+        "pass": false,
+        "returned": 50,
+        "scanned": 712
+      },
+      {
+        "amp": 13.26,
+        "ms": 3.5761590115725994,
+        "name": "paged",
+        "pass": false,
+        "returned": 50,
+        "scanned": 663
+      },
+      {
+        "amp": 12.28,
+        "ms": 3.342839889228344,
+        "name": "paged",
+        "pass": false,
+        "returned": 50,
+        "scanned": 614
+      },
+      {
+        "amp": 11.16,
+        "ms": 3.176911035552621,
+        "name": "paged",
+        "pass": false,
+        "returned": 50,
+        "scanned": 558
+      },
+      {
+        "amp": 10.18,
+        "ms": 2.9606111347675323,
+        "name": "paged",
+        "pass": false,
+        "returned": 50,
+        "scanned": 509
+      },
+      {
+        "amp": 9.2,
+        "ms": 2.620754996314645,
+        "name": "paged",
+        "pass": true,
+        "returned": 50,
+        "scanned": 460
+      },
+      {
+        "amp": 8.22,
+        "ms": 2.4700879584997892,
+        "name": "paged",
+        "pass": true,
+        "returned": 50,
+        "scanned": 411
+      },
+      {
+        "amp": 7.24,
+        "ms": 2.238983055576682,
+        "name": "paged",
+        "pass": true,
+        "returned": 50,
+        "scanned": 362
+      },
+      {
+        "amp": 6.26,
+        "ms": 2.058818005025387,
+        "name": "paged",
+        "pass": true,
+        "returned": 50,
+        "scanned": 313
+      },
+      {
+        "amp": 5.28,
+        "ms": 1.8776718061417341,
+        "name": "paged",
+        "pass": true,
+        "returned": 50,
+        "scanned": 264
+      },
+      {
+        "amp": 4.16,
+        "ms": 1.5996787697076797,
+        "name": "paged",
+        "pass": true,
+        "returned": 50,
+        "scanned": 208
+      },
+      {
+        "amp": 3.18,
+        "ms": 1.5472478698939085,
+        "name": "paged",
+        "pass": true,
+        "returned": 50,
+        "scanned": 159
+      },
+      {
+        "amp": 2.2,
+        "ms": 1.2638678308576345,
+        "name": "paged",
+        "pass": true,
+        "returned": 50,
+        "scanned": 110
+      },
+      {
+        "amp": 1.22,
+        "ms": 1.0921538341790438,
+        "name": "paged",
+        "pass": true,
+        "returned": 50,
+        "scanned": 61
+      }
+    ]
+  },
+  "finished": "2026-09-28T19:00:57+0800",
+  "mode": "scan",
+  "summary": {
+    "amp_max": 20.0,
+    "amp_mean": 5.39296,
+    "detail_head": [
+      {
+        "amp": 7.0,
+        "ms": 2.612581942230463,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 1.135355094447732,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.8712781127542257,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7758189458400011,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7691490463912487,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.8458548691123724,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7867598906159401,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7475640159100294,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7174939382821321,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7959799841046333,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7574609480798244,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.713458051905036,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.8268940728157759,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7100850343704224,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7552099414169788,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.768889207392931,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7182930130511522,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.753333093598485,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7409730460494757,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      },
+      {
+        "amp": 7.0,
+        "ms": 0.7842301856726408,
+        "name": "asof_1of1000",
+        "pass": true,
+        "returned": 1,
+        "scanned": 7
+      }
+    ],
+    "fail_samples": [
+      {
+        "amp": 20.0,
+        "ms": 28.4997820854187,
+        "name": "paged",
+        "pass": false,
+        "returned": 50,
+        "scanned": 1000
+      },
+      {
+        "amp": 19.28,
+        "ms": 5.239709978923202,
+        "name": "paged",
+        "pass": false,
+        "returned": 50,
+        "scanned": 964
+      },
+      {
+        "amp": 18.16,
+        "ms": 4.600815940648317,
+        "name": "paged",
+        "pass": false,
+        "returned": 50,
+        "scanned": 908
+      },
+      {
+        "amp": 17.18,
+        "ms": 4.405002109706402,
+        "name": "paged",
+        "pass": false,
+        "returned": 50,
+        "scanned": 859
+      },
+      {
+        "amp": 16.2,
+        "ms": 4.045590991154313,
+        "name": "paged",
+        "pass": false,
+        "returned": 50,
+        "scanned": 810
+      },
+      {
+        "amp": 15.22,
+        "ms": 3.9392299950122833,
+        "name": "paged",
+        "pass": false,
+        "returned": 50,
+        "scanned": 761
+      },
+      {
+        "amp": 14.24,
+        "ms": 3.780241822823882,
+        "name": "paged",
+        "pass": false,
+        "returned": 50,
+        "scanned": 712
+      },
+      {
+        "amp": 13.26,
+        "ms": 3.5761590115725994,
+        "name": "paged",
+        "pass": false,
+        "returned": 50,
+        "scanned": 663
+      },
+      {
+        "amp": 12.28,
+        "ms": 3.342839889228344,
+        "name": "paged",
+        "pass": false,
+        "returned": 50,
+        "scanned": 614
+      },
+      {
+        "amp": 11.16,
+        "ms": 3.176911035552621,
+        "name": "paged",
+        "pass": false,
+        "returned": 50,
+        "scanned": 558
+      },
+      {
+        "amp": 10.18,
+        "ms": 2.9606111347675323,
+        "name": "paged",
+        "pass": false,
+        "returned": 50,
+        "scanned": 509
+      }
+    ],
+    "passed": false,
+    "samples": 125,
+    "scanned_max": 1000
+  },
+  "tag": "gate5-scan"
+}

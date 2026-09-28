@@ -1,0 +1,75 @@
+{
+  "argv": [
+    "cv_perf_driver.py",
+    "--out-dir",
+    "results",
+    "between",
+    "--label",
+    "perf-asof",
+    "--entity",
+    "perf-asof-1",
+    "--intervals",
+    "1000",
+    "--multi-label",
+    "perf-multi",
+    "--multi-prefix",
+    "perf-multi",
+    "--multi-entities",
+    "100",
+    "--iters",
+    "1500",
+    "--warmup",
+    "200",
+    "--tag",
+    "gate3-full"
+  ],
+  "extra": {
+    "scenarios": {
+      "multi_between": {
+        "count": 1500,
+        "iters": 1500,
+        "max": 13.91201582737267,
+        "mean": 1.0864587506900232,
+        "p50": 1.054729102179408,
+        "p95": 1.2743332888931036,
+        "p99": 1.461106662172824,
+        "returned_max": 50,
+        "returned_min": 50,
+        "scanned_max": 63,
+        "seconds": 1.7438390254974365
+      },
+      "single_between": {
+        "count": 1500,
+        "hits_first": 200,
+        "iters": 1500,
+        "max": 27.308913180604577,
+        "mean": 1.9429600764997303,
+        "p50": 1.8860489362850785,
+        "p95": 2.0956026040948927,
+        "p99": 2.97446396201849,
+        "returned_max": 200,
+        "returned_min": 200,
+        "scanned_max": 210,
+        "seconds": 3.178635597229004
+      },
+      "single_overlap": {
+        "count": 1500,
+        "hits_first": 200,
+        "iters": 1500,
+        "max": 8.733855094760656,
+        "mean": 1.8751700503441195,
+        "p50": 1.8335824133828282,
+        "p95": 2.061705570667982,
+        "p99": 2.6016733329743142,
+        "returned_max": 200,
+        "returned_min": 200,
+        "scanned_max": 210,
+        "seconds": 3.0768115520477295
+      }
+    }
+  },
+  "finished": "2026-09-28T19:29:41+0800",
+  "mode": "between",
+  "summary": {},
+  "tag": "gate3-full"
+}

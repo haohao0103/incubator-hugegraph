@@ -1,0 +1,83 @@
+{
+  "argv": [
+    "cv_perf_driver.py",
+    "append",
+    "--threads",
+    "16",
+    "--duration",
+    "600",
+    "--run-id",
+    "postfix0928",
+    "--tag",
+    "gate4-postfix"
+  ],
+  "extra": {},
+  "finished": "2026-09-28T20:21:51+0800",
+  "mode": "append",
+  "summary": {
+    "duration_s": 600.0239539146423,
+    "error_rate": 0.5394569179471924,
+    "error_samples": [
+      "rand 500 class org.apache.hugegraph.store.client.type.HgStoreClientException: org.apache.hugegraph.store.client.type.HgStoreClientException: {sessionInfo: {storeNodeSession: {storeNode: {address: \"10.129.33.121:8550\", nodeId: 8162359861891770268}, graphName: \"DEFAULT/hugegraph/g\"}}, reason: \"PARTITION_FAULT_",
+      "rand 500 class org.apache.hugegraph.store.client.type.HgStoreClientException: org.apache.hugegraph.store.client.type.HgStoreClientException: {sessionInfo: {storeNodeSession: {storeNode: {address: \"10.129.33.121:8550\", nodeId: 8162359861891770268}, graphName: \"DEFAULT/hugegraph/g\"}}, reason: \"PARTITION_FAULT_",
+      "seq 500 class org.apache.hugegraph.store.client.type.HgStoreClientException: org.apache.hugegraph.store.client.type.HgStoreClientException: {sessionInfo: {storeNodeSession: {storeNode: {address: \"10.129.33.121:8550\", nodeId: 8162359861891770268}, graphName: \"DEFAULT/hugegraph/g\"}}, reason: \"PARTITION_FAULT_",
+      "seq 500 class org.apache.hugegraph.store.client.type.HgStoreClientException: org.apache.hugegraph.store.client.type.HgStoreClientException: {sessionInfo: {storeNodeSession: {storeNode: {address: \"10.129.33.121:8550\", nodeId: 8162359861891770268}, graphName: \"DEFAULT/hugegraph/g\"}}, reason: \"PARTITION_FAULT_",
+      "rand 500 class org.apache.hugegraph.store.client.type.HgStoreClientException: org.apache.hugegraph.store.client.type.HgStoreClientException: {sessionInfo: {storeNodeSession: {storeNode: {address: \"10.129.33.121:8550\", nodeId: 8162359861891770268}, graphName: \"DEFAULT/hugegraph/g\"}}, reason: \"PARTITION_FAULT_",
+      "rand 500 class org.apache.hugegraph.store.client.type.HgStoreClientException: org.apache.hugegraph.store.client.type.HgStoreClientException: {sessionInfo: {storeNodeSession: {storeNode: {address: \"10.129.33.121:8550\", nodeId: 8162359861891770268}, graphName: \"DEFAULT/hugegraph/g\"}}, reason: \"PARTITION_FAULT_",
+      "seq 500 class org.apache.hugegraph.store.client.type.HgStoreClientException: org.apache.hugegraph.store.client.type.HgStoreClientException: {sessionInfo: {storeNodeSession: {storeNode: {address: \"10.129.33.121:8550\", nodeId: 8162359861891770268}, graphName: \"DEFAULT/hugegraph/g\"}}, reason: \"PARTITION_FAULT_",
+      "seq 500 class org.apache.hugegraph.store.client.type.HgStoreClientException: org.apache.hugegraph.store.client.type.HgStoreClientException: {sessionInfo: {storeNodeSession: {storeNode: {address: \"10.129.33.121:8550\", nodeId: 8162359861891770268}, graphName: \"DEFAULT/hugegraph/g\"}}, reason: \"PARTITION_FAULT_",
+      "seq 500 class org.apache.hugegraph.store.client.type.HgStoreClientException: org.apache.hugegraph.store.client.type.HgStoreClientException: {sessionInfo: {storeNodeSession: {storeNode: {address: \"10.129.33.121:8550\", nodeId: 8162359861891770268}, graphName: \"DEFAULT/hugegraph/g\"}}, reason: \"PARTITION_FAULT_",
+      "rand 500 class org.apache.hugegraph.store.client.type.HgStoreClientException: org.apache.hugegraph.store.client.type.HgStoreClientException: {sessionInfo: {storeNodeSession: {storeNode: {address: \"10.129.33.121:8550\", nodeId: 8162359861891770268}, graphName: \"DEFAULT/hugegraph/g\"}}, reason: \"PARTITION_FAULT_",
+      "seq 500 class org.apache.hugegraph.store.client.type.HgStoreClientException: org.apache.hugegraph.store.client.type.HgStoreClientException: {sessionInfo: {storeNodeSession: {storeNode: {address: \"10.129.33.121:8550\", nodeId: 8162359861891770268}, graphName: \"DEFAULT/hugegraph/g\"}}, reason: \"PARTITION_FAULT_",
+      "seq 500 class org.apache.hugegraph.store.client.type.HgStoreClientException: org.apache.hugegraph.store.client.type.HgStoreClientException: {sessionInfo: {storeNodeSession: {storeNode: {address: \"10.129.33.121:8550\", nodeId: 8162359861891770268}, graphName: \"DEFAULT/hugegraph/g\"}}, reason: \"PARTITION_FAULT_",
+      "seq 500 class org.apache.hugegraph.store.client.type.HgStoreClientException: org.apache.hugegraph.store.client.type.HgStoreClientException: {sessionInfo: {storeNodeSession: {storeNode: {address: \"10.129.33.121:8550\", nodeId: 8162359861891770268}, graphName: \"DEFAULT/hugegraph/g\"}}, reason: \"PARTITION_FAULT_",
+      "seq 500 class org.apache.hugegraph.store.client.type.HgStoreClientException: org.apache.hugegraph.store.client.type.HgStoreClientException: {sessionInfo: {storeNodeSession: {storeNode: {address: \"10.129.33.122:8550\", nodeId: 8329624752612189596}, graphName: \"DEFAULT/hugegraph/g\"}}, reason: \"PARTITION_FAULT_",
+      "hot 500 class org.apache.hugegraph.store.client.type.HgStoreClientException: org.apache.hugegraph.store.client.type.HgStoreClientException: {sessionInfo: {storeNodeSession: {storeNode: {address: \"10.129.33.122:8550\", nodeId: 8329624752612189596}, graphName: \"DEFAULT/hugegraph/g\"}}, reason: \"PARTITION_FAULT_",
+      "hot 500 class org.apache.hugegraph.store.client.type.HgStoreClientException: org.apache.hugegraph.store.client.type.HgStoreClientException: {sessionInfo: {storeNodeSession: {storeNode: {address: \"10.129.33.122:8550\", nodeId: 8329624752612189596}, graphName: \"DEFAULT/hugegraph/g\"}}, reason: \"PARTITION_FAULT_",
+      "seq 500 class org.apache.hugegraph.store.client.type.HgStoreClientException: org.apache.hugegraph.store.client.type.HgStoreClientException: {sessionInfo: {storeNodeSession: {storeNode: {address: \"10.129.33.121:8550\", nodeId: 8162359861891770268}, graphName: \"DEFAULT/hugegraph/g\"}}, reason: \"PARTITION_FAULT_",
+      "rand 500 class org.apache.hugegraph.store.client.type.HgStoreClientException: org.apache.hugegraph.store.client.type.HgStoreClientException: {sessionInfo: {storeNodeSession: {storeNode: {address: \"10.129.33.121:8550\", nodeId: 8162359861891770268}, graphName: \"DEFAULT/hugegraph/g\"}}, reason: \"PARTITION_FAULT_",
+      "rand 500 class org.apache.hugegraph.store.client.type.HgStoreClientException: org.apache.hugegraph.store.client.type.HgStoreClientException: {sessionInfo: {storeNodeSession: {storeNode: {address: \"10.129.33.122:8550\", nodeId: 8329624752612189596}, graphName: \"DEFAULT/hugegraph/g\"}}, reason: \"PARTITION_FAULT_",
+      "hot 500 class org.apache.hugegraph.store.client.type.HgStoreClientException: org.apache.hugegraph.store.client.type.HgStoreClientException: {sessionInfo: {storeNodeSession: {storeNode: {address: \"10.129.33.122:8550\", nodeId: 8329624752612189596}, graphName: \"DEFAULT/hugegraph/g\"}}, reason: \"PARTITION_FAULT_"
+    ],
+    "mps": 345.7511965089189,
+    "per_role": {
+      "hot": {
+        "count": 41389,
+        "err": 48832,
+        "max": 165.09495544433594,
+        "mean": 38.80083414512234,
+        "ok": 41389,
+        "p50": 33.54137420654297,
+        "p95": 82.84030151367188,
+        "p99": 103.94892089843758,
+        "rps": 68.97891280835078
+      },
+      "rand": {
+        "count": 62059,
+        "err": 73135,
+        "max": 131.75440979003906,
+        "mean": 19.021885482074616,
+        "ok": 62059,
+        "p50": 16.913480758666992,
+        "p95": 38.16971397399902,
+        "p99": 56.78154884338376,
+        "rps": 103.42753750932472
+      },
+      "seq": {
+        "count": 104011,
+        "err": 121040,
+        "max": 95.89009857177734,
+        "mean": 20.36625392549691,
+        "ok": 104011,
+        "p50": 18.737398147583008,
+        "p95": 38.807180404663086,
+        "p99": 50.985645675659136,
+        "rps": 173.3447461912434
+      }
+    },
+    "threads": 16,
+    "total_err": 243007,
+    "total_ok": 207459
+  },
+  "tag": "gate4-postfix"
+}

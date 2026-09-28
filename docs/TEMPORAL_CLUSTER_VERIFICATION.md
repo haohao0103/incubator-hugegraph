@@ -1,8 +1,10 @@
 # Temporal 真实集群验证清单（脚手架 + 签收表）
 
 状态：**真实集群执行中**（stg-121/122/123，2026-09-28 起；已完成滚动升级、flag 开启、
-功能闭环与异常受控复查、故障恢复演练；性能/回滚演练与签收表待执行——实测记录、发现与
-性能优化见第 10–11 节。本文档只记录真实执行结果，**不含、也不得填入伪造结果**）
+功能闭环与异常受控复查、故障恢复演练；性能门槛 #2/#3/#6/#5 已实测达标（#5 分页 limit 下推
+修复后复测通过），#1 测量无效、#4 REST 准入墙已解除且零数据错误但吞吐受客户端所限未证实
+≥1000mps（均需处置，见 §10.9），#7 与回滚演练待执行——实测记录、发现与性能优化见第 10–11 节。
+本文档只记录真实执行结果，**不含、也不得填入伪造结果**）
 关联：[TEMPORAL_GRAPH_SUPPORT_PLAN.md](TEMPORAL_GRAPH_SUPPORT_PLAN.md) §5.4 / §6.3 / §7.2 ·
 [TEMPORAL_SERIALIZER_COMPATIBILITY_RFC.md](TEMPORAL_SERIALIZER_COMPATIBILITY_RFC.md) §7
 
@@ -12,7 +14,7 @@
 leader 切换、Raft replay、Store 重启、snapshot/restore、分片迁移必须在真实 HStore/PD/Raft
 集群上验证；HBase / Memory / RocksDB 不作为 temporal 验收依据；真实压测前不得宣称达标。**
 
-离线单测（`TemporalSuiteTest`，51 项）只能覆盖**不依赖活集群**的契约（编解码、幂等、
+离线单测（`TemporalSuiteTest`，52 项）只能覆盖**不依赖活集群**的契约（编解码、幂等、
 冲突仲裁逻辑、状态机 replay 分支、feature flag 门、fail-closed 版本拒绝）。下列每一项都
 **需要一套真实运行的 3×PD / 3×Store / 3×Server 集群**，其结果只能由执行人在集群上采集后
 填入第 8 节签收表，**不可由本次开发离线产出或推测**。
@@ -156,11 +158,11 @@ CP="target/classes:$(cat target/cp.txt)"   # 含 store-core/common/grpc/client/n
 2. [ ] 降级到不支持 temporal 的旧版本（如需）：
    - 验证：普通图继续可用；temporal 数据**不得**按普通 vertex/edge/property 解读；
      capability 路径显式返回 `TEMPORAL_UNSUPPORTED_VERSION`；有显式告警。
-3. [ ] 回滚后跑离线 `TemporalSuiteTest`（应仍 51 项全绿）+ 普通图全量回归。
+3. [ ] 回滚后跑离线 `TemporalSuiteTest`（应仍 52 项全绿）+ 普通图全量回归。
 
 ## 7. 合并前硬门槛核对（§7.2）
 
-- [ ] 所有新增 temporal 单元测试通过（离线 `TemporalSuiteTest` 51 项）
+- [ ] 所有新增 temporal 单元测试通过（离线 `TemporalSuiteTest` 52 项）
 - [ ] HStore/PD/Raft 是唯一 temporal backend 目标；未以 HBase/Memory/RocksDB 测试替代
 - [ ] 现有非时序 core/API/TinkerPop 测试全量通过
 - [ ] 旧数据无需迁移即可继续普通查询
@@ -177,20 +179,25 @@ CP="target/classes:$(cat target/cp.txt)"   # 含 store-core/common/grpc/client/n
 > **纪律**：本表只能由实际运行集群的人填入真实测量值与日志路径。开发/离线阶段保持空白，
 > 不得预填、估算或伪造。任一项空白即表示该门槛"待真实集群验证"，不得宣称达标。
 
+> 下表 #1–#6 为 2026-09-28 在 stg-121/122/123（分支 `feature/temporal-graph-enhance` HEAD
+> `636c48c72`，Store/Server 均为 10.8 部署的优化版，flag on）由 `cv_perf_driver.py`
+> （stg-121 集群内运行，Python 3.11，避免客户端网络噪声）实测；证据 JSON 存于
+> `_out/perf/results/`。#7 与回滚演练仍待执行，保持空白。判定理由见 §10.9。
+
 | 项 | 执行人 | 集群版本/JDK | 实测结果 | 日志/证据路径（`_out/...`） | 通过? |
 |---|---|---|---|---|---|
-| 门槛 #1 普通查询 P95 回归 | | | | | ☐ |
-| 门槛 #2 `as_of` P95/P99 | | | | | ☐ |
-| 门槛 #3 `between`/`overlap` P95/P99 | | | | | ☐ |
-| 门槛 #4 append 吞吐 | | | | | ☐ |
-| 门槛 #5 扫描行数 ≤ 10× | | | | | ☐ |
-| 门槛 #6 当前/历史一致性 | | | | | ☐ |
-| 门槛 #7 资源放大 | | | | | ☐ |
-| 功能闭环（第 3 节） | | | | | ☐ |
-| 故障恢复（第 4 节） | | | | | ☐ |
-| 滚动升级（第 5 节） | | | | | ☐ |
-| 回滚演练（第 6 节） | | | | | ☐ |
-| 合并硬门槛（第 7 节） | | | | | ☐ |
+| 门槛 #1 普通查询 P95 回归 | cv_perf_driver | stg HEAD 636c48c72 / Store+Server Java 11 | A(旧构建)窗口P95均值 2.704ms vs B(优化版)3.820ms=+41%；预热复测(3.820)与冷启(3.757)一致→回归稳定可复现，但**不可归因 temporal**（读路径经代码证明中性），A/B 跑在不同集群状态（详见 §10.9-A）→**测量无效** | `perf/results/normal-a-old-build-*164939.json`、`normal-b-new-build-*173821.json`、`normal-b-warm-retest-*185405.json` | ☐ 待干净复测 |
+| 门槛 #2 `as_of` P95/P99 | cv_perf_driver | 同上 | 单实体 1000 区间、10,000 次：**P95=0.78ms P99=0.87ms**（阈值 ≤50/≤100ms） | `perf/results/asof-gate2-asof-*190010.json` | ☑ 通过 |
+| 门槛 #3 `between`/`overlap` P95/P99 | cv_perf_driver | 同上 | 单实体1000：between P95=2.10/P99=2.97、overlap P95=2.06/P99=2.60；多实体100×100：between P95=1.27/P99=1.46ms（阈值 ≤100/≤200ms） | `perf/results/between-gate3-full-*192941.json` | ☑ 通过 |
+| 门槛 #4 append 吞吐 | cv_perf_driver | 同上（Server `max_worker_threads` 16→128） | 调参后 16 并发/1KB/600s 干净复测：**错误率 0.0（0 条 503/temporal/数据错误）**、**606.4 mutation/s**；准入墙已消除（Server 日志 0 条 503/`too busy`），写路径在压力下正确。但 606 < 1000 冻结门槛，且 128 workers 下**零 503→服务端未饱和**，单进程 16 线程 Python 客户端很可能是吞吐上限→**606 为客户端受限下界，服务端 ≥1000mps 未证实**（详见 §10.9-C） | `perf/results/append-gate4-clean-*203702.json`（受污染轮次留档 `append-gate4-append-*191222.json`、`append-gate4-postfix-*202151.json`） | ☐ 错误率达标；吞吐需升级压测客户端复测 |
+| 门槛 #5 扫描行数 ≤ 10× | cv_perf_driver | 同上（Store 分页 limit 下推修复后重部署） | **全部达标**：as_of 7.0×、narrow(10区间) 2.1×、wide(全1000) 1.0×；**分页 overlap(limit=50) 修复前 20×→修复后 1.12–1.26×**（scanned 56–63/returned 50），summary passed=True、amp_max=7.0(≤10)、amp_mean=3.87、fail_samples=[]（详见 §10.9-B，发现 4 已实施） | `perf/results/scan-gate5-postfix-*201053.json`（修复前 `scan-gate5-scan-*190057.json`） | ☑ 通过 |
+| 门槛 #6 当前/历史一致性 | cv_perf_driver | 同上 | 单实体 1000 区间：expected=1000 actual=1000 **missing=0 extra=0 rev_bad=0**（0 不一致样本） | `perf/results/consist-gate6-consist-*190057.json` | ☑ 通过 |
+| 门槛 #7 资源放大 | | | 待执行（需保留策略实现 + 1亿 interval 规模，见 §9） | | ☐ |
+| 功能闭环（第 3 节） | agent | stg HEAD 636c48c72 | §10.2 REST 16 子项 + Store Direct round-trip；probe 复验 append/as_of/overlap 闭环正确 | §10.2 / `perf/results/probe-warm-probe-*182223.json` | ☑ 通过 |
+| 故障恢复（第 4 节） | agent | 同上 | §10.6 leader 切换/Raft replay/Store 重启/写入中断重试幂等全通过；**snapshot/restore round-trip 与分片迁移未做** | §10.6 | ☐ 核心通过，两项待补 |
+| 滚动升级（第 5 节） | agent | 同上 | §10.2/§10.8 两轮滚动升级（Store×3→Server×3→统一开 flag）普通图不中断 | §10.2 / §10.8 | ☑ 通过 |
+| 回滚演练（第 6 节） | | | 待执行 | | ☐ |
+| 合并硬门槛（第 7 节） | | | 待 #1/#4/#5/#7 与回滚演练关闭后核对 | | ☐ |
 
 ## 9. 已知缺口（诚实登记，不投机自建）
 
@@ -293,9 +300,11 @@ rollbackBackend 均不残留）连同既有 53 项，server 侧 **62/62 全绿**
 
 - ~~故障恢复（第 4 节）~~：已完成核心四项（见 10.6）；**snapshot/restore round-trip 与分片迁移未做**，登记待补；
 - ~~10.3 残留缺陷修复~~：代码已修复 + 离线回归全绿（见 10.3），待重部署后集群复验并关闭；
-- 性能门槛七项（第 2 节）：需先搭建压测驱动（§9 已登记缺口）；
+- ~~性能门槛七项（第 2 节）~~：#2/#3/#6 已实测达标、**#5 分页 limit 下推修复后复测通过**（§10.9）；
+  #1 测量无效待干净复测、**#4 错误率已达标（0）但吞吐 606mps 受客户端所限、≥1000 待升级压测客户端复测**、
+  #7 待保留策略实现后执行；
 - 回滚演练（第 6 节）；
-- 第 8 节签收表：待上述完成后填入实测值。
+- 第 8 节签收表：#2/#3/#5/#6/功能闭环/滚动升级 已回填实测值；#1/#4/#7/回滚/合并硬门槛 待关闭后回填。
 
 ### 10.6 故障恢复演练实测（cv-fault，2026-09-28 下午）
 
@@ -328,12 +337,146 @@ rollbackBackend 均不残留）连同既有 53 项，server 侧 **62/62 全绿**
 **工具链备注（非产品缺陷）**：121 Server 绑定节点 IP（10.129.33.121），本机 `127.0.0.1` 探测会被拒，
 验证脚本应以节点 IP 探测；Store 优雅停 30s 超时需强杀回退（上文缺陷）。
 
+### 10.7 发现 3：区间序列定位粒度为 `(graph, fact_key)`——`entity_id`/`temporal_label` 不参与（与设计行键契约偏差）
+
+**证据链（cv-perf driver 设计期代码实读确认）**：
+
+- **写入定位**：bundle 的 fact key = 用户 `fact_key` 的 canonical bytes（`TemporalMutationBundleFactory`，纯维度）；
+  Store 分区定位 `code = PartitionUtils.calcHashcode(bundle.factKey())`（`TemporalMutationHandler` L129/L187）；
+  interval marker 行键 `TemporalIntervalCodec.intervalKey(bundle)`
+  = `fact_key || MARKER_VERSION || bucket || valid_from || valid_to`——**不含 entity/label 字节**。
+- **查询定位**：查询 RPC（`TemporalQueryReq`）无 entity/label 字段；`TemporalQueryHandler`
+  以 `bucketPrefix(factKey, bucket)` 为扫描前缀、仅扫 `g+temporal_history` 的 marker 行；分区同样按 fact key hash。
+- **REST**：GET `/intervals` 的 `temporal_label` 仅做非空校验（`TemporalAPI` L125），调用查询时
+  **不再传递**（L173），不参与定位/过滤；GET 无 entity 参数。
+- **四视图**：`TemporalMutationPlanner` 生成的四个视图 key 前缀含 `(graph, label, entity, fact_key)`，
+  `writeInterval` 会原样落库四张 `g+temporal_*` 表；但全仓检索**生产代码无任何读取方**
+  （仅写入方与测试引用），查询路径不使用它们做定位。
+
+**与设计契约的偏差**：`TEMPORAL_GRAPH_SUPPORT_PLAN.md` §5.3 查询契约要求主路径按
+`entity_id + temporal_label + fact_key` scope；Phase 2 设计行键为
+`graph + temporal_label + entity_id + fact_key_hash + ...`、共置组为
+`(graph, temporal_label, entity_id, fact_key)` 四元组。
+
+**影响**：不同实体/标签若复用同一 `fact_key` 维度值，会**共享同一条区间序列**：写入冲突仲裁
+互相干扰、查询结果混返且无法按实体/标签区分。当前使用约定（每实体唯一 fact_key——cv-perf driver
+的 `fact_for(entity)` 与 cv-func 测试均按此）下功能正确。
+
+**处置（本轮不改冻结字节布局）**：固化 API 使用约定——`fact_key` 维度值必须唯一标识事实序列
+（不同实体必须使用互异的维度值），并随 REST 接口说明对外明确；后续版本若要将 label/entity
+编入 marker 行键，属存储布局变更（需新 `MARKER_VERSION` + 迁移方案），另行评审排期。
+
+### 10.8 优化版重部署完成记录（2026-09-28 17:00–17:07；cv-perf 前置）
+
+- **部署包（md5 三台复核一致）**：Server `d6ef119c48a11d534b8367c96349c9d7`（387 MB）、
+  Store `a7cc753bc93b2cf0137478565a5ff3c6`（285 MB）；传输完成 `ALL_MD5_OK` 16:17:58。
+- **滚动顺序**：Store 121→122→123（flag off 替换；每台 health OK）→ Server 121→122→123（REST OK）
+  → Store 三台带 `-j "-Dhugegraph.temporal.enabled=true"` 重启（flag on，cmdline 复核）。
+- **新进程**：Store 121/122/123 = `19268/27584/15444`，Server = `18438/26730/13642`
+  （启动于 17:02–17:07）。
+- **jemalloc 对齐（A/B 公平性）**：mvn 发行包 `bin/` 不含 `libjemalloc.so`（assembly 排除 `*.so`），
+  旧部署为手工放入；本次为 store 升级脚本补"从 BAK 保留 + 启动后 `/proc/<pid>/maps` 校验"步骤
+  —— 三台均 `jemalloc: loaded`（md5 `fd61765e...` 与启动脚本 expected_md5 一致）。
+  Server 侧历史与现役均未用 jemalloc，无需处理。
+- **部署后即时验证**：driver probe PASS —— 普通查询 5 项全 200；temporal append（200/51.5ms/10.1ms）
+  + as_of（hits=1 scanned=2）+ overlap（hits=2 scanned=2）闭环正确；三台 Server 端到端 vertices
+  查询一致。新栈启动后无 ERROR（store 仅 `HgMetricService` 启动瞬态 2 条/台即止）；滚动窗口内其他图
+  （`chry_ab_*`）瞬时 scan 失败属重启瞬态，非缺陷。
+- **A 侧基线（旧构建 + jemalloc，normal 30min）**：7,850,412 请求 / **0 错误** / 4361.34 rps；
+  P50=1.782ms、P95=2.7016ms、P99=3.393ms；窗口 P95 均值 2.7043ms（CI95 [2.6835, 2.7250]，31 窗口）。
+- **工具链备注**：Store 优雅停 30s 超时（已知缺陷）→ 升级/flag 切换脚本内置 jstack 留证 + `kill -9`
+  回退（本轮三台各触发一次，行为符合预期）；Server 优雅停正常。
+
+### 10.9 性能门槛实测与判定（2026-09-28，cv-perf；#5 已修复复测通过，#4 错误率达标/吞吐待定，#1 待干净复测）
+
+> 全部数值为 stg-121/122/123 集群内实测（driver 在 stg-121 本地打 10.129.33.121:8080，
+> Python 3.11），证据 JSON 存 `_out/perf/results/`。#2/#3/#6 大幅达标；#5 分页 limit 下推修复后
+> 复测通过；#1 测量无效、#4 错误率达标但吞吐受客户端所限未证实，逐项如实记录，不宣称达标。
+
+**A. 门槛 #1（普通查询 P95 回归）——测量无效，40% 差异不可归因 temporal**
+
+- 实测：A 侧（旧构建，16:19–16:49）窗口 P95 均值 2.704ms、rps 4361；B 侧（优化版）两次——
+  冷启（17:08–17:38，紧接 17:00–17:07 滚动重启）3.757ms/rps 3369，预热复测（18:23–18:54，
+  重启后 ~80min）3.820ms/rps 3326。**预热与冷启一致**→ 排除 JIT/RocksDB block cache 冷启假象，
+  B 构建普通读确实稳定慢 ~40%。
+- **代码级归因（证明非 temporal）**：#1 请求集全是 GET 读（vertices/edges）。temporal 改动仅落在
+  写/commit 路径——`AbstractTransaction.commit2Backend` 新增的 `flushPendingTemporalWrites()`
+  基类为 no-op，`GraphTransaction` override 首行即 `if (pendingTemporalWrites.isEmpty()) return`；
+  普通读事务从不进入该分支。S1–S12 亦全为 temporal 写/查路径优化。
+- **A/B 不干净（真正混淆变量）**：A 侧跑在 17:00 滚动重启 + §10.6 故障演练（kill leader、Store
+  重启）**之前**的干净集群；B 侧跑在重启后、演练后、且累积了大量 temporal 测试数据（cv-func/
+  cv-fault/本轮 prepare+append 数十万区间）的集群上。两侧集群状态（数据量、compaction 背景、
+  Region/leader 分布） materially 不同，违反 §2「只控一个变量」纪律。故 40% 差异**既不能判 temporal
+  达标、也不能判其不达标**——它混入了集群状态漂移。
+- **处置**：门槛 #1 数据作废，须做干净受控 A/B——同一集群状态下，用「无 temporal 改动的基线构建」
+  vs「temporal 构建」（同一 JDK/Maven/请求集），两侧同等预热、隔离窗口、无并发传输，back-to-back 复跑；
+  或退一步用同一 temporal 构建 flag off vs on 对照（读路径不受 flag 门控，应证得 ~0 差异）。
+  签收表 #1 保持「待干净复测」，不填通过。
+
+**B. 发现 4：分页 `overlap` 扫描未把 limit 下推（门槛 #5 分页路径 20× 放大）**
+
+- 实测：`scan` 模式索引命中场景全部达标（as_of 7.0×、narrow 2.1×、wide 全 1000 行 1.0×），
+  但**分页 `overlap`（limit=50，全 1000 区间范围）首页 scanned=1000/returned=50 = 20×**，
+  随游标推进递减（964/908/859…），driver 判 `passed=False`。
+- **根因（代码级）**：`TemporalQueryHandler.rangePage`（L262）先调 `range(effectiveFrom, to)`
+  **物化整个剩余匹配区间**（L269），再在 L277 `subList(0, limit)` 截断；`ScanBudget.checkRow()`
+  把每条物理读行计入 `scannedRows`。分页 limit **未下推进扫描**，无「收满 limit 即早停」，
+  每页仍全量扫剩余范围 → 翻完 N/limit 页总成本 O(N²/limit)。Phase 4「查询下推」在分页路径上有真实遗漏。
+- **影响**：功能正确（半开区间 + valid_from 唯一 → 游标精确、不重不漏，§10.7 约定下成立），
+  但深分页大范围 overlap 有扫描放大与随之的延迟/IO 成本；窄范围/命中即返的查询不受影响。
+- **处置（本轮已实施 + 复测通过）**：`TemporalQueryHandler` 抽出 `rangeScoped(...cursor, bodyCap)`
+  承载 between/overlap/rangePage 三路；分页路径传 `bodyCap=limit+1`，在升序桶扫描收满 `limit+1`
+  条 eligible 即 `break outer`（桶按升序、桶内 `scanBucket` 已按 valid_from 升序，早停保留最小的
+  limit+1 条，merge+sort+take-limit 精确）；`cursor!=NO_CURSOR` 时 step3 单条跨越区间回溯加守卫跳过
+  （earlier 桶行 valid_from 必 ≤ cursor 会被丢弃，省去每页最多 1024 空桶回溯）；open 桶(step1)与
+  spanning(step3)仍每页收全（各限一桶，廉价，避免丢失大 valid_from 的 open marker）。
+  `between`/`overlap` 走 `rangeScoped(NO_CURSOR, 0)`，与旧 `range()` 字节等价，不受影响。
+  - **离线回归**：新增 `shouldRangePageEarlyStopBoundScan`（20 跨桶 marker、limit=3、断言单页
+    scanned≤6），`TemporalSuiteTest` **52/52 全绿**（含 serializer 兼容不回退）。
+  - **重部署**：重建 `hg-store-node` Spring Boot 胖包（nested `hg-store-core` 校验 STORED + javap
+    确认 `rangeScoped`/`afterCursor`），三台 Store 滚动换新 jar（md5 三台一致 `bbcc998a…`，旧 jar 备份
+    `.bak-20260928`；新 pid 6147/15400/31782，flag on、Raft 健康重加入）。
+  - **复测 #5（PASS）**：分页 `overlap(limit=50)` amp **20.0×→1.12–1.26×**（scanned 56–63/returned 50），
+    summary `passed=True`、`amp_max=7.0`(≤10)、`amp_mean=3.87`、`fail_samples=[]`；as_of 7.0×/wide 1.0×/
+    narrow 2.1× 不变。证据 `perf/results/scan-gate5-postfix-*201053.json`。签收表 #5 置「通过」。
+
+**C. 门槛 #4（append 吞吐）——首轮被 REST 准入墙截断；调参+修工装后干净复测错误率 0、606mps（客户端受限，≥1000 未证实）**
+
+- 实测：16 并发/1KB/600s，成功 473,748（**789.5 mutation/s**）、失败 441,934（**48.3%**）。
+  失败样本**清一色 503 `ServiceUnavailableException: The server is too busy … restserver.max_worker_threads`**，
+  **无一条 TEMPORAL_CONFLICT / 数据错误**。成功写延迟合理：seq P50=11.6/P95=25ms、
+  rand P50=11.6/P95=29ms、hot（单 fact key 热点）P50=42/P95=73ms。
+- **根因**：`LoadDetectFilter`（hugegraph-api）在 `currentLoad >= maxWorkerThreads` 时抛 503；
+  `restserver.max_worker_threads` 默认 `2×CPU`，stg 节点 `nproc=8` → **默认 16**，恰等于 16 并发客户端，
+  故约半数请求在**到达 temporal 路径之前**就被 REST 前门准入拒绝。这是部署侧 REST 线程池配置上限，
+  不是 temporal 追加吞吐上限；789.5 mps 是准入限流下成功写入的真实速率，0 数据错误说明写路径本身在压力下正确。
+- **处置（本轮已实施 + 复测，仍未证实 ≥1000mps）**：三台 Server `rest-server.properties` 追加
+  `restserver.max_worker_threads=128`（备份 `.bak-20260928`，新 pid 10804/20200/2902，REST 200），
+  **503 准入墙消除**——重跑错误从 503 `ServiceUnavailable` 变为 0 条 503。
+  - **发现 5：append 基准跨轮 fact-key 碰撞（工装缺陷，已修）**：调参后首次重跑（run=postfix0928）
+    错误率反升至 **53.9%、mps 345**，错误清一色 500 `PARTITION_FAULT`/Store `TEMPORAL_CONFLICT`
+    （node-121 单台 20:20–20:24 窗口即 17237 条冲突）。根因：`_append_worker` 的 fact key
+    （`{"thread":tid,"mode":seq|rand}`、`{"mode":"hot"}`）与 `valid_from`（每轮从 `base+0` 重来）
+    **均不含 run_id**，仅 mutation_id 含；故第二轮把相同 `valid_from` 重放到第一轮已提交区间上必冲突。
+    per_role seq `ok=104011/err=121040`（≈54%）与「第一轮因 503 只提交约 52%、留下稀疏空洞，
+    第二轮命中已提交即冲突、命中空洞即成功」定量吻合。修复：driver 三个 fact key 加 `"run": run`
+    维度，使每轮写入全新 fact 序列（属压测工装改动，非产品代码）。
+  - **干净复测（run=clean0928）**：**total_err=0、error_rate=0.0、606.4 mutation/s**
+    （seq 303/rand 182/hot 121 rps；seq p50=12.0/p95=40.9ms、rand p50=11.6/p95=64.9ms、
+    hot p50=63.5/p95=107.8ms）。Server 日志 0 条 503/`too busy`。
+  - **判定**：错误率门槛（=0）**达标**；吞吐 606 < 1000 冻结门槛**未证实达标**——但 128 workers
+    下零 503 说明**服务端 REST 前门未饱和、仍有余量**，单进程 16 线程 Python 客户端（GIL + 同步 POST）
+    很可能是吞吐上限，606 应视为**客户端受限下界**而非服务端 append 天花板。签收表 #4 保持未通过：
+    错误率已达标，≥1000mps 须用多进程/更高并发压测客户端复测方能对服务端定论。
+
+**门槛 #7（资源放大）与回滚演练（第 6 节）** 仍待执行：#7 需保留策略实现 + 1 亿 interval 规模（§9 已登记缺口）。
+
 ## 11. 性能审计与优化（2026-09-28，代码级；待部署 + cv-perf 实测）
 
 > **纪律**：本节记录代码级审计结论、优化实现与离线验证状态；所有端到端性能变化**只能**由
 > 重新部署后的第 2 节七项门槛实测（cv-perf）确认，本节不含推测数值、不宣称达标。
-> **部署状态**：本节全部改动（S1–S12、§11.4 泄漏误报修复与 §10.3 残留修复）为本地实现，
-> **尚未部署到 stg**，现网仍是优化前构建；重部署须走第 5 节滚动升级纪律。
+> **部署状态**：本节全部改动（S1–S12、§11.4 泄漏误报修复与 §10.3 残留修复）已滚动重部署到 stg
+> （2026-09-28 17:00–17:07，三台 Store/Server 全部换新，见 10.8）；A/B 基线与七项门槛实测进行中。
 
 ### 11.1 审计范围与方法
 
@@ -377,7 +520,8 @@ tie-breaker 字节全部不变，由 `TemporalSerializerCompatibilityTest` 与�
 
 ### 11.3 离线验证（完成）
 
-- Store 侧 `TemporalSuiteTest`：**51/51 全绿**（含 `TemporalSerializerCompatibilityTest`，字节兼容不回退）；
+- Store 侧 `TemporalSuiteTest`：**52/52 全绿**（含 `TemporalSerializerCompatibilityTest`，字节兼容不回退；
+  新增分页早停回归 `shouldRangePageEarlyStopBoundScan`）；
 - Server 侧 9 个 temporal 测试类：**48/48 全绿**（tie-breaker base32 值、row-key 宽度 94B 等既有字节断言均未变）；
 - 两侧全量编译通过；mock 测试同步补齐了新 scan 调用面的 stub（语义与真实 Store 的 `[start, end)` 扫描一致）。
 
@@ -407,9 +551,21 @@ action；`doClose()` 调用 `cleanable.clean()` 因此同步执行了 `CleaningS
 
 ### 11.5 待办（与第 2/8 节联动）
 
-- 重新构建含本节全部改动的 Store/Server 包并部署（下次窗口，走第 5 节滚动升级纪律）；
-- 部署后执行 cv-perf：七项性能门槛实测并回填第 8 节签收表（**唯一**的性能达标依据）；
+- ~~重新构建含本节全部改动的 Store/Server 包并部署~~：已完成（见 10.8；包 md5 双验证 + 三台滚动升级 + flag on）；
+- ~~部署后执行 cv-perf：七项性能门槛实测并回填第 8 节签收表~~：部分完成（见 §10.9）——
+  **#2 as_of / #3 between,overlap / #6 一致性 已实测大幅达标**；**#5 分页 limit 下推修复后复测通过**
+  （20×→1.12–1.26×）；**#1 测量无效**（A/B 集群状态混淆，40% 差异不可归因 temporal，需干净受控复测）；
+  **#4 错误率已达标（0）但吞吐 606mps 受客户端所限、≥1000 未证实**；**#7 未执行**（需保留策略 + 1亿规模）；
 - 部署后复验 §10.3 残留修复：按 10.6-A 同法做污染判别探测——制造确定性冲突失败后，
   同线程紧邻请求须 200 且无新幽灵 index（修复前该探测为 11/30 失败）；
-- 部署后观察 24h：`BinaryEntryIterator` WARN 应归零（或仅剩 `Cleaner-*` 线程条目）。
+- 部署后观察 24h：`BinaryEntryIterator` WARN 应归零（或仅剩 `Cleaner-*` 线程条目）；
+- ~~修复发现 4（分页 limit 下推 + 收满早停），使门槛 #5 分页路径达标~~：已完成（见 §10.9-B：
+  `rangeScoped`+`bodyCap` 早停+cursor 守卫，离线 52/52、重部署、复测 amp 20×→1.12–1.26× PASS）；
+- ~~调高 stg 三台 Server `restserver.max_worker_threads` 后重跑门槛 #4~~：已调至 128 并重跑（见 §10.9-C：
+  503 准入墙消除、错误率 0；另发现并修复 append 基准跨轮 fact-key 碰撞工装缺陷）；
+- 门槛 #4 吞吐定论：现单进程 16 线程 Python 客户端下 606mps（服务端零 503 未饱和），需多进程/
+  更高并发压测客户端才能对服务端 append 天花板与 ≥1000mps 门槛定论；
+- 安排干净受控 A/B 重测门槛 #1（基线构建 vs temporal 构建，同集群状态/同预热/隔离窗口）；
+- 评审 §10.7 定位粒度偏差：固化 API 约定（`fact_key` 唯一标识事实序列），或后续版本把
+  label/entity 编入 marker 行键（存储布局变更，需新 `MARKER_VERSION` + 迁移，另行排期）。
 

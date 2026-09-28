@@ -1,0 +1,89 @@
+{
+  "argv": [
+    "cv_perf_driver.py",
+    "--out-dir",
+    "results",
+    "append",
+    "--label",
+    "perf-app",
+    "--prefix",
+    "perf-app",
+    "--threads",
+    "16",
+    "--duration",
+    "600",
+    "--payload-kb",
+    "1",
+    "--tag",
+    "gate4-append"
+  ],
+  "extra": {},
+  "finished": "2026-09-28T19:12:22+0800",
+  "mode": "append",
+  "summary": {
+    "duration_s": 600.0314548015594,
+    "error_rate": 0.482628248671482,
+    "error_samples": [
+      "seq 503 class jakarta.ws.rs.ServiceUnavailableException: The server is too busy to process the request, you can config restserver.max_worker_threads to adjust it or try again later",
+      "rand 503 class jakarta.ws.rs.ServiceUnavailableException: The server is too busy to process the request, you can config restserver.max_worker_threads to adjust it or try again later",
+      "rand 503 class jakarta.ws.rs.ServiceUnavailableException: The server is too busy to process the request, you can config restserver.max_worker_threads to adjust it or try again later",
+      "seq 503 class jakarta.ws.rs.ServiceUnavailableException: The server is too busy to process the request, you can config restserver.max_worker_threads to adjust it or try again later",
+      "hot 503 class jakarta.ws.rs.ServiceUnavailableException: The server is too busy to process the request, you can config restserver.max_worker_threads to adjust it or try again later",
+      "seq 503 class jakarta.ws.rs.ServiceUnavailableException: The server is too busy to process the request, you can config restserver.max_worker_threads to adjust it or try again later",
+      "seq 503 class jakarta.ws.rs.ServiceUnavailableException: The server is too busy to process the request, you can config restserver.max_worker_threads to adjust it or try again later",
+      "rand 503 class jakarta.ws.rs.ServiceUnavailableException: The server is too busy to process the request, you can config restserver.max_worker_threads to adjust it or try again later",
+      "seq 503 class jakarta.ws.rs.ServiceUnavailableException: The server is too busy to process the request, you can config restserver.max_worker_threads to adjust it or try again later",
+      "seq 503 class jakarta.ws.rs.ServiceUnavailableException: The server is too busy to process the request, you can config restserver.max_worker_threads to adjust it or try again later",
+      "rand 503 class jakarta.ws.rs.ServiceUnavailableException: The server is too busy to process the request, you can config restserver.max_worker_threads to adjust it or try again later",
+      "seq 503 class jakarta.ws.rs.ServiceUnavailableException: The server is too busy to process the request, you can config restserver.max_worker_threads to adjust it or try again later",
+      "hot 503 class jakarta.ws.rs.ServiceUnavailableException: The server is too busy to process the request, you can config restserver.max_worker_threads to adjust it or try again later",
+      "rand 503 class jakarta.ws.rs.ServiceUnavailableException: The server is too busy to process the request, you can config restserver.max_worker_threads to adjust it or try again later",
+      "rand 503 class jakarta.ws.rs.ServiceUnavailableException: The server is too busy to process the request, you can config restserver.max_worker_threads to adjust it or try again later",
+      "seq 503 class jakarta.ws.rs.ServiceUnavailableException: The server is too busy to process the request, you can config restserver.max_worker_threads to adjust it or try again later",
+      "rand 503 class jakarta.ws.rs.ServiceUnavailableException: The server is too busy to process the request, you can config restserver.max_worker_threads to adjust it or try again later",
+      "seq 503 class jakarta.ws.rs.ServiceUnavailableException: The server is too busy to process the request, you can config restserver.max_worker_threads to adjust it or try again later",
+      "seq 503 class jakarta.ws.rs.ServiceUnavailableException: The server is too busy to process the request, you can config restserver.max_worker_threads to adjust it or try again later",
+      "seq 503 class jakarta.ws.rs.ServiceUnavailableException: The server is too busy to process the request, you can config restserver.max_worker_threads to adjust it or try again later"
+    ],
+    "mps": 789.5386086995663,
+    "per_role": {
+      "hot": {
+        "count": 94873,
+        "err": 88333,
+        "max": 135.6451416015625,
+        "mean": 43.59865389116968,
+        "ok": 94873,
+        "p50": 42.24799728393555,
+        "p95": 73.10951843261716,
+        "p99": 86.46329956054684,
+        "rps": 158.11337762513818
+      },
+      "rand": {
+        "count": 142408,
+        "err": 132294,
+        "max": 121.79215240478516,
+        "mean": 13.771808427121222,
+        "ok": 142408,
+        "p50": 11.64576530456543,
+        "p95": 29.37713117599484,
+        "p99": 53.06974441528305,
+        "rps": 237.3342244984419
+      },
+      "seq": {
+        "count": 236467,
+        "err": 221307,
+        "max": 123.68568420410156,
+        "mean": 12.888228507058608,
+        "ok": 236467,
+        "p50": 11.600076675415039,
+        "p95": 24.955024909973126,
+        "p99": 33.404797439575184,
+        "rps": 394.09100657598634
+      }
+    },
+    "threads": 16,
+    "total_err": 441934,
+    "total_ok": 473748
+  },
+  "tag": "gate4-append"
+}

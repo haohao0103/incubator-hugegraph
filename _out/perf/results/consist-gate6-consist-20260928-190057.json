@@ -1,0 +1,38 @@
+{
+  "argv": [
+    "cv_perf_driver.py",
+    "--out-dir",
+    "results",
+    "consist",
+    "--label",
+    "perf-asof",
+    "--entity-prefix",
+    "perf-asof",
+    "--entities",
+    "1",
+    "--intervals",
+    "1000",
+    "--tag",
+    "gate6-consist"
+  ],
+  "extra": {
+    "entities": [
+      {
+        "actual": 1000,
+        "entity": "perf-asof-1",
+        "expected": 1000,
+        "extra": 0,
+        "missing": 0,
+        "rows_without_revision": 0
+      }
+    ]
+  },
+  "finished": "2026-09-28T19:00:57+0800",
+  "mode": "consist",
+  "summary": {
+    "entities": 1,
+    "mismatched_entities": 0,
+    "passed": true
+  },
+  "tag": "gate6-consist"
+}

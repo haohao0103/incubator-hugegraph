@@ -1,0 +1,42 @@
+{
+  "argv": [
+    "cv_perf_driver.py",
+    "--out-dir",
+    "results",
+    "prepare",
+    "--label",
+    "perf-asof",
+    "--entity-prefix",
+    "perf-asof",
+    "--entities",
+    "1",
+    "--intervals",
+    "1000",
+    "--writers",
+    "4",
+    "--tag",
+    "prep-asof"
+  ],
+  "extra": {
+    "verify": [
+      {
+        "entity": "perf-asof-1",
+        "expected": 1000,
+        "got": 1000
+      }
+    ]
+  },
+  "finished": "2026-09-28T18:59:38+0800",
+  "mode": "prepare",
+  "summary": {
+    "entities": 1,
+    "error_samples": [],
+    "intervals_per": 1000,
+    "mps": 672.117355940308,
+    "seconds": 1.48783540725708,
+    "verify_ok": true,
+    "wrote_err": 0,
+    "wrote_ok": 1000
+  },
+  "tag": "prep-asof"
+}

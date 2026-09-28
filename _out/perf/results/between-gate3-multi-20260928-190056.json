@@ -1,0 +1,43 @@
+{
+  "argv": [
+    "cv_perf_driver.py",
+    "--out-dir",
+    "results",
+    "between",
+    "--entity",
+    "",
+    "--multi-label",
+    "perf-multi",
+    "--multi-prefix",
+    "perf-multi",
+    "--multi-entities",
+    "100",
+    "--iters",
+    "1500",
+    "--warmup",
+    "200",
+    "--tag",
+    "gate3-multi"
+  ],
+  "extra": {
+    "scenarios": {
+      "multi_between": {
+        "count": 1500,
+        "iters": 1500,
+        "max": 12.484381906688213,
+        "mean": 1.1049764454364777,
+        "p50": 1.0473440634086728,
+        "p95": 1.5431327861733735,
+        "p99": 1.6999386856332421,
+        "returned_max": 50,
+        "returned_min": 50,
+        "scanned_max": 63,
+        "seconds": 1.7720918655395508
+      }
+    }
+  },
+  "finished": "2026-09-28T19:00:56+0800",
+  "mode": "between",
+  "summary": {},
+  "tag": "gate3-multi"
+}

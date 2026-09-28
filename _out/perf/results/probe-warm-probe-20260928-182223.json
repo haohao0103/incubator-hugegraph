@@ -1,0 +1,15 @@
+{
+  "argv": [
+    "cv_perf_driver.py",
+    "probe",
+    "--tag",
+    "warm-probe"
+  ],
+  "extra": {},
+  "finished": "2026-09-28T18:22:23+0800",
+  "mode": "probe",
+  "summary": {
+    "ok": true
+  },
+  "tag": "warm-probe"
+}
