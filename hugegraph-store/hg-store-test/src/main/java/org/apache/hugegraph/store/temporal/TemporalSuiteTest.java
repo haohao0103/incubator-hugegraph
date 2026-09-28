@@ -18,6 +18,7 @@
 package org.apache.hugegraph.store.temporal;
 
 import org.apache.hugegraph.store.business.BusinessHandlerAtomicBatchTest;
+import org.apache.hugegraph.store.core.raft.PartitionStateMachineTemporalReplayTest;
 import org.apache.hugegraph.store.core.raft.PartitionStateMachineTemporalScopingTest;
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;
@@ -28,9 +29,10 @@ import org.junit.runners.Suite;
  * <p>Only tests that run free (no live PD/Store/Raft cluster) belong here, so
  * the suite is safe to wire into the default {@code mvn test} lifecycle. The
  * interval codec / mutation handler / query handler cover the fact-scoped
- * bucketed layout and its bounded-scan guards; the raft-scoping and atomic-batch
- * tests pin the "explicit fail instead of silent skip" and same-transaction
- * invariants. Cluster-dependent integration tests
+ * bucketed layout and its bounded-scan guards; the raft-scoping, raft-replay
+ * and atomic-batch tests pin the "explicit fail instead of silent skip",
+ * replay-branch log advancement / rejection classification and
+ * same-transaction invariants. Cluster-dependent integration tests
  * ({@code TemporalStoreDirect*Test}) are deliberately excluded: they require a
  * real HStore/PD/Raft deployment and are validated in the Phase 2/3 cluster
  * runs, not in unit regression.</p>
@@ -41,6 +43,7 @@ import org.junit.runners.Suite;
         TemporalMutationHandlerTest.class,
         TemporalQueryHandlerTest.class,
         PartitionStateMachineTemporalScopingTest.class,
+        PartitionStateMachineTemporalReplayTest.class,
         BusinessHandlerAtomicBatchTest.class
 })
 public class TemporalSuiteTest {
