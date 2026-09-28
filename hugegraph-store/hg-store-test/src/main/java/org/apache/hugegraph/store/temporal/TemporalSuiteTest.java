@@ -29,7 +29,10 @@ import org.junit.runners.Suite;
  * <p>Only tests that run free (no live PD/Store/Raft cluster) belong here, so
  * the suite is safe to wire into the default {@code mvn test} lifecycle. The
  * interval codec / mutation handler / query handler cover the fact-scoped
- * bucketed layout and its bounded-scan guards; the feature-flag test pins the
+ * bucketed layout and its bounded-scan guards; the bundle-codec and
+ * serializer-compatibility tests pin the round-trip invariants and the
+ * fail-closed version refusal (foreign codec/marker/index versions are rejected,
+ * never misparsed); the feature-flag test pins the
  * rollout gate and its replay-ungated rollback boundary; the raft-scoping,
  * raft-replay and atomic-batch tests pin the "explicit fail instead of silent
  * skip", replay-branch log advancement / rejection classification and
@@ -41,6 +44,7 @@ import org.junit.runners.Suite;
 @RunWith(Suite.class)
 @Suite.SuiteClasses({
         TemporalMutationBundleCodecTest.class,
+        TemporalSerializerCompatibilityTest.class,
         TemporalFeatureFlagTest.class,
         TemporalMutationHandlerTest.class,
         TemporalQueryHandlerTest.class,
