@@ -450,6 +450,35 @@ public class TemporalQueryHandlerTest {
         assertTrue(stats.scannedRows() >= page.rows().size());
     }
 
+    @Test
+    public void shouldRangePageEarlyStopBoundScan() {
+        BusinessHandler business = mock(BusinessHandler.class);
+        byte[] factKey = bytes("fact");
+        // 20 closed intervals, each alone in its own 7-day bucket, spanning the
+        // whole query window. A paged read must stop after ~limit rows instead of
+        // re-scanning all 20 buckets on every page (design-doc finding 4 / §10.9).
+        long width = TemporalIntervalCodec.BUCKET_WIDTH_MILLIS;
+        RocksDBSession.BackendColumn[] markers = new RocksDBSession.BackendColumn[20];
+        for (int i = 0; i < 20; i++) {
+            markers[i] = marker(factKey, i * width, i * width + 1000L, i + 1L);
+        }
+        when(business.scanPrefix(anyString(), anyInt(), anyString(), any()))
+                .thenAnswer(scanAnswer(markers));
+
+        TemporalQueryHandler query = new TemporalQueryHandler(business);
+        TemporalQueryHandler.ScanStats stats = new TemporalQueryHandler.ScanStats();
+        TemporalQueryHandler.Page page = query.rangePage(
+                "g", factKey, 0L, 20L * width, 3L, TemporalQueryHandler.NO_CURSOR, stats);
+
+        assertEquals(3, page.rows().size());
+        assertEquals(0L, page.rows().get(0).validFrom());
+        assertTrue(page.hasMore());
+        // Early stop: only the first limit+1 buckets are scanned, not all 20, so
+        // the paged amplification stays near 1x instead of window/limit.
+        assertTrue("paged scan must early-stop, scanned=" + stats.scannedRows(),
+                   stats.scannedRows() <= 6L);
+    }
+
     // ----------------------------------------------------- append -> as_of loop
 
     @Test

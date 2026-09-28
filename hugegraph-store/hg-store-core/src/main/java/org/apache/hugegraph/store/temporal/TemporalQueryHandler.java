@@ -195,53 +195,98 @@ public final class TemporalQueryHandler {
 
     private List<TemporalIntervalRow> range(String graph, byte[] factKey,
                                             long from, long to, ScanStats stats) {
+        return rangeScoped(graph, factKey, from, to, stats, NO_CURSOR, 0L);
+    }
+
+    /**
+     * Shared fact-scoped interval-intersection scan behind {@link #between},
+     * {@link #overlap} and {@link #rangePage}.
+     *
+     * <p>{@code cursor} and {@code bodyCap} exist only for the paged caller:
+     * {@code cursor != NO_CURSOR} drops rows with {@code valid_from <= cursor}
+     * (the page window is already narrowed to {@code cursor + 1} by the caller),
+     * and {@code bodyCap > 0} stops the ascending in-window bucket walk once that
+     * many closed rows have been collected, so a wide window no longer re-scans
+     * the whole range on every page (design-doc finding 4 / §10.9). Open markers
+     * (step 1) and the single spanning interval (step 3) are always collected in
+     * full: both are bounded by one bucket, so capping them could drop the
+     * earliest rows of a page without saving a material scan. With
+     * {@code NO_CURSOR} and {@code bodyCap == 0} this is byte-for-byte the
+     * pre-pagination behaviour, so {@code between}/{@code overlap} are unchanged.</p>
+     */
+    private List<TemporalIntervalRow> rangeScoped(String graph, byte[] factKey,
+                                                  long from, long to, ScanStats stats,
+                                                  long cursor, long bodyCap) {
         if (from >= to) {
             return Collections.emptyList();
         }
         int code = PartitionUtils.calcHashcode(factKey);
         ScanBudget budget = new ScanBudget(stats);
-        List<TemporalIntervalRow> result = new ArrayList<>();
+        // Rows collected out of ascending body order (open markers and the single
+        // spanning interval); merged with the body and sorted at the end.
+        List<TemporalIntervalRow> prefix = new ArrayList<>();
+        List<TemporalIntervalRow> body = new ArrayList<>();
         // 1. Open markers: [a, open) intersects [from, to) iff a < to.
         for (TemporalIntervalRow row : scanBucket(graph, factKey, code,
                                                   TemporalIntervalCodec.OPEN_BUCKET,
                                                   budget)) {
-            if (row.validFrom() < to) {
-                result.add(row);
+            if (row.validFrom() < to && afterCursor(row, cursor)) {
+                prefix.add(row);
             }
         }
-        // 2. Closed markers whose valid_from falls inside [from, to).
+        // 2. Closed markers whose valid_from falls inside [from, to), scanned in
+        //    ascending bucket order so the body is ascending by valid_from; stop
+        //    early once bodyCap rows are collected (paged caller only).
         long fromBucket = TemporalIntervalCodec.bucketOf(from);
         long toBucket = TemporalIntervalCodec.bucketOf(to - 1);
         if (toBucket - fromBucket + 1 > this.maxBuckets) {
             throw limitExceeded();
         }
+        outer:
         for (long bucket = fromBucket; bucket <= toBucket; bucket++) {
             for (TemporalIntervalRow row : scanBucket(graph, factKey, code, bucket,
                                                       budget)) {
-                if (row.validFrom() < to && from < row.validTo()) {
-                    result.add(row);
+                if (row.validFrom() < to && from < row.validTo()
+                    && afterCursor(row, cursor)) {
+                    body.add(row);
+                    if (bodyCap > 0 && body.size() >= bodyCap) {
+                        break outer;
+                    }
                 }
             }
         }
         // 3. Closed markers starting before `from` that span into [from, to).
         //    Only the latest interval of an earlier bucket can span `from`
         //    (every earlier interval ends before it starts), so stop at the
-        //    first non-empty earlier bucket.
-        for (long bucket = fromBucket - 1; bucket > fromBucket - 1 - this.maxBuckets;
-             bucket--) {
-            List<TemporalIntervalRow> earlier = scanBucket(graph, factKey, code, bucket,
-                                                           budget);
-            if (earlier.isEmpty()) {
-                continue;
+        //    first non-empty earlier bucket. Skipped for a resumed page
+        //    (cursor != NO_CURSOR): every earlier-bucket row has valid_from <=
+        //    cursor there (fromBucket = bucketOf(cursor + 1)), so afterCursor
+        //    would drop it anyway -- this avoids walking up to maxBuckets empty
+        //    buckets on each page after the first.
+        if (cursor == NO_CURSOR) {
+            for (long bucket = fromBucket - 1; bucket > fromBucket - 1 - this.maxBuckets;
+                 bucket--) {
+                List<TemporalIntervalRow> earlier = scanBucket(graph, factKey, code, bucket,
+                                                               budget);
+                if (earlier.isEmpty()) {
+                    continue;
+                }
+                TemporalIntervalRow latest = earlier.get(earlier.size() - 1);
+                if (latest.validFrom() < to && (latest.open() || from < latest.validTo())) {
+                    prefix.add(latest);
+                }
+                break;
             }
-            TemporalIntervalRow latest = earlier.get(earlier.size() - 1);
-            if (latest.validFrom() < to && (latest.open() || from < latest.validTo())) {
-                result.add(latest);
-            }
-            break;
         }
+        List<TemporalIntervalRow> result = new ArrayList<>(prefix.size() + body.size());
+        result.addAll(prefix);
+        result.addAll(body);
         result.sort(Comparator.comparingLong(TemporalIntervalRow::validFrom));
         return result;
+    }
+
+    private static boolean afterCursor(TemporalIntervalRow row, long cursor) {
+        return cursor == NO_CURSOR || row.validFrom() > cursor;
     }
 
     /**
@@ -266,14 +311,13 @@ public final class TemporalQueryHandler {
             return new Page(Collections.emptyList(), NO_CURSOR, stats);
         }
         long effectiveFrom = cursor == NO_CURSOR ? from : Math.max(from, cursor + 1);
-        List<TemporalIntervalRow> matched = range(graph, factKey, effectiveFrom, to, stats);
-        List<TemporalIntervalRow> eligible = new ArrayList<>();
-        for (TemporalIntervalRow row : matched) {
-            if (cursor != NO_CURSOR && row.validFrom() <= cursor) {
-                continue; // already returned by a previous page
-            }
-            eligible.add(row);
-        }
+        // bodyCap = limit + 1: collect just enough ascending rows to fill the page
+        // and detect a successor, so a wide window no longer re-scans the whole
+        // range on every page (design-doc finding 4 / §10.9). The cursor filter is
+        // applied inside rangeScoped, matching the previous post-filter exactly.
+        long bodyCap = limit > 0 ? limit + 1 : 0L;
+        List<TemporalIntervalRow> eligible =
+                rangeScoped(graph, factKey, effectiveFrom, to, stats, cursor, bodyCap);
         if (limit > 0 && eligible.size() > limit) {
             List<TemporalIntervalRow> page =
                     new ArrayList<>(eligible.subList(0, (int) limit));
