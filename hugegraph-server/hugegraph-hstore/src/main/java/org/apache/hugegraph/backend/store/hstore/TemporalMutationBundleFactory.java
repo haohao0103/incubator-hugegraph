@@ -57,6 +57,13 @@ public final class TemporalMutationBundleFactory {
 
     public static TemporalMutationBundle build(TemporalWrite.Request request,
                                                TemporalMutationPlan plan) {
+        // Phase C (additive): thread the optional graph-element binding through to
+        // the Store bundle. An unbound request maps to ElementKind.NONE, so the
+        // Store writes no element-index entry and behaves exactly as before.
+        TemporalWrite.ElementBinding binding = request.elementBinding();
+        TemporalMutationBundle.ElementKind elementKind = toElementKind(binding);
+        String elementId = binding == null ? null : binding.elementId();
+        String elementLabel = binding == null ? null : binding.elementLabel();
         if (request.operation() == TemporalWrite.Operation.CLOSE ||
             request.operation() == TemporalWrite.Operation.DELETE) {
             boolean open = request.validTo() == null;
@@ -72,7 +79,8 @@ public final class TemporalMutationBundleFactory {
                     open ? 0L : request.validTo(),
                     open,
                     request.payload(),
-                    Collections.emptyList());
+                    Collections.emptyList(),
+                    elementKind, elementId, elementLabel);
         }
 
         List<TemporalMutationBundle.ViewMutation> views = new ArrayList<>(4);
@@ -100,7 +108,8 @@ public final class TemporalMutationBundleFactory {
                 open ? 0L : request.validTo(),
                 open,
                 request.payload(),
-                views);
+                views,
+                elementKind, elementId, elementLabel);
     }
 
     private static TemporalMutationBundle.Operation toOperation(
@@ -116,6 +125,28 @@ public final class TemporalMutationBundleFactory {
                 return TemporalMutationBundle.Operation.DELETE;
             default:
                 throw new IllegalArgumentException("unknown temporal operation: " + operation);
+        }
+    }
+
+    /**
+     * Map the Server-core element binding onto the Store bundle element kind.
+     * A {@code null} binding (the common, pre-Phase-C case) maps to
+     * {@link TemporalMutationBundle.ElementKind#NONE} so the Store keeps the
+     * current-only behavior and writes no element-index entry.
+     */
+    private static TemporalMutationBundle.ElementKind toElementKind(
+            TemporalWrite.ElementBinding binding) {
+        if (binding == null) {
+            return TemporalMutationBundle.ElementKind.NONE;
+        }
+        switch (binding.kind()) {
+            case VERTEX:
+                return TemporalMutationBundle.ElementKind.VERTEX;
+            case EDGE:
+                return TemporalMutationBundle.ElementKind.EDGE;
+            default:
+                throw new IllegalArgumentException(
+                        "unknown temporal element kind: " + binding.kind());
         }
     }
 }

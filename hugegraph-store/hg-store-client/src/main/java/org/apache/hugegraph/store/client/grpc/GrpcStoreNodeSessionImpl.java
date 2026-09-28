@@ -46,6 +46,7 @@ import org.apache.hugegraph.store.grpc.common.Key;
 import org.apache.hugegraph.store.grpc.common.OpType;
 import org.apache.hugegraph.store.grpc.common.TableMethod;
 import org.apache.hugegraph.store.grpc.session.BatchEntry;
+import org.apache.hugegraph.store.grpc.session.TemporalBundle;
 import org.apache.hugegraph.store.grpc.session.TemporalQueryRes;
 import org.apache.hugegraph.store.grpc.session.TemporalQueryType;
 import org.apache.hugegraph.store.grpc.stream.HgStoreStreamGrpc.HgStoreStreamStub;
@@ -80,6 +81,9 @@ class GrpcStoreNodeSessionImpl implements HgStoreNodeSession {
     private boolean isAutoCommit = true;
     private String batchId;
     private LinkedList<BatchEntry> batchEntries = new LinkedList<>();
+    // Phase B: temporal bundles buffered within the current tx; carried in the
+    // SAME batch proposal on commit so normal + temporal writes commit atomically.
+    private LinkedList<TemporalBundle> temporalBundles = new LinkedList<>();
 
     GrpcStoreNodeSessionImpl(HgStoreNode storeNode, String graphName,
                              HgStoreNodeManager nodeManager,
@@ -133,10 +137,18 @@ class GrpcStoreNodeSessionImpl implements HgStoreNodeSession {
                 throw new IllegalStateException("It's not in tx state");
             }
             if (this.batchEntries.isEmpty()) {
+                // No normal write in this tx. Any buffered temporal bundles are
+                // dispatched over the standalone temporalMutation RPC, preserving
+                // the pre-Phase-B temporal-only behavior (a batch proposal with no
+                // normal entries cannot satisfy the Store's co-location rule).
+                this.flushTemporalOnly();
                 this.resetTx();
                 return;
             }
-            if (!this.doCommit(this.batchEntries)) {
+            // Normal writes present: carry the buffered temporal bundles in the
+            // SAME batch proposal so they commit atomically with the normal
+            // entries in one Store transaction (Phase B).
+            if (!this.doCommit(this.batchEntries, this.temporalBundles)) {
                 throw new Exception("Failed to invoke doCommit");
             }
         } catch (Throwable t) {
@@ -164,6 +176,22 @@ class GrpcStoreNodeSessionImpl implements HgStoreNodeSession {
         this.isAutoCommit = true;
         this.batchId = null;
         this.batchEntries = new LinkedList<>();
+        this.temporalBundles = new LinkedList<>();
+    }
+
+    // Flush buffered temporal bundles outside a batch proposal via the standalone
+    // temporalMutation RPC (temporal-only tx path, unchanged from pre-Phase-B).
+    private void flushTemporalOnly() {
+        for (TemporalBundle bundle : this.temporalBundles) {
+            boolean ok = this.notifier.invoke(
+                    () -> this.storeSessionClient.doTemporalMutation(
+                            this, bundle.getCode(), bundle.getBundle().toByteArray()),
+                    e -> true).orElse(false);
+            if (!ok) {
+                throw new RuntimeException("Failed to invoke temporal mutation");
+            }
+        }
+        this.temporalBundles.clear();
     }
 
     //TODO: not support distributed tx yet.
@@ -235,8 +263,13 @@ class GrpcStoreNodeSessionImpl implements HgStoreNodeSession {
     }
 
     private boolean doCommit(List<BatchEntry> entries) {
+        return this.doCommit(entries, null);
+    }
+
+    private boolean doCommit(List<BatchEntry> entries, List<TemporalBundle> temporalBundles) {
         return this.notifier.invoke(
-                () -> this.storeSessionClient.doBatch(this, this.getBatchId(), entries),
+                () -> this.storeSessionClient.doBatch(this, this.getBatchId(), entries,
+                                                      temporalBundles),
                 e -> true
         ).orElse(false);
     }
@@ -262,6 +295,16 @@ class GrpcStoreNodeSessionImpl implements HgStoreNodeSession {
 
     @Override
     public boolean temporalMutation(int code, byte[] bundle) {
+        if (!this.isAutoCommit) {
+            // In a tx: buffer the bundle so commit() can carry it in the same batch
+            // proposal as the normal writes (atomic). Outside a tx the standalone
+            // RPC path below is unchanged from pre-Phase-B.
+            this.temporalBundles.add(TemporalBundle.newBuilder()
+                                                   .setCode(code)
+                                                   .setBundle(ByteString.copyFrom(bundle))
+                                                   .build());
+            return true;
+        }
         return this.notifier.invoke(
                 () -> this.storeSessionClient.doTemporalMutation(this, code, bundle),
                 e -> true).orElse(false);

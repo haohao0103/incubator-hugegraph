@@ -39,6 +39,7 @@ import org.apache.hugegraph.store.grpc.session.GraphReq;
 import org.apache.hugegraph.store.grpc.session.HgStoreSessionGrpc;
 import org.apache.hugegraph.store.grpc.session.HgStoreSessionGrpc.HgStoreSessionBlockingStub;
 import org.apache.hugegraph.store.grpc.session.TableReq;
+import org.apache.hugegraph.store.grpc.session.TemporalBundle;
 import org.apache.hugegraph.store.grpc.session.TemporalMutationReq;
 import org.apache.hugegraph.store.grpc.session.TemporalQueryReq;
 import org.apache.hugegraph.store.grpc.session.TemporalQueryRes;
@@ -100,8 +101,20 @@ class GrpcStoreSessionClient extends AbstractGrpcClient {
     }
 
     FeedbackRes doBatch(HgStoreNodeSession nodeSession, String batchId, List<BatchEntry> entries) {
+        return doBatch(nodeSession, batchId, entries, null);
+    }
+
+    // Phase B (additive): carry temporal bundles in the SAME batch proposal so
+    // normal and temporal writes commit atomically in one Store transaction. When
+    // temporalBundles is null/empty the wire request is byte-identical to the
+    // pre-Phase-B non-temporal batch.
+    FeedbackRes doBatch(HgStoreNodeSession nodeSession, String batchId, List<BatchEntry> entries,
+                        List<TemporalBundle> temporalBundles) {
         BatchWriteReq.Builder writeReq = BatchWriteReq.newBuilder();
         writeReq.addAllEntry(entries);
+        if (temporalBundles != null && !temporalBundles.isEmpty()) {
+            writeReq.addAllTemporalBundle(temporalBundles);
+        }
         return this.getBlockingStub(nodeSession)
                    .batch(BatchReq.newBuilder()
                                   .setHeader(getHeader(nodeSession))

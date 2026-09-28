@@ -19,6 +19,7 @@ package org.apache.hugegraph.temporal.store;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Objects;
 
 /**
  * Request and result types of one temporal mutation.
@@ -49,6 +50,80 @@ public final class TemporalWrite {
         IDEMPOTENT_NOOP
     }
 
+    /** Graph-element kind a temporal write may be bound to (Phase C). */
+    public enum ElementKind {
+        VERTEX,
+        EDGE
+    }
+
+    /**
+     * Immutable binding of a temporal write to one graph element (Phase C).
+     *
+     * The binding is additive metadata: it never enters {@code VertexId} /
+     * {@code EdgeId}, never changes id generation or sortKeys, and never alters
+     * the fact key / entity id / interval / idempotency fingerprint. It only
+     * tells the Store to also maintain the {@code g+temporal_element_index}
+     * entry (element_id -> valid intervals) in the same atomic transaction.
+     */
+    public static final class ElementBinding {
+
+        private final ElementKind kind;
+        private final String elementId;
+        private final String elementLabel;
+
+        public ElementBinding(ElementKind kind, String elementId, String elementLabel) {
+            if (kind == null) {
+                throw new IllegalArgumentException("element kind can't be null");
+            }
+            if (elementId == null || elementId.isEmpty()) {
+                throw new IllegalArgumentException("element id can't be null or empty");
+            }
+            if (elementLabel == null || elementLabel.isEmpty()) {
+                throw new IllegalArgumentException("element label can't be null or empty");
+            }
+            this.kind = kind;
+            this.elementId = elementId;
+            this.elementLabel = elementLabel;
+        }
+
+        public ElementKind kind() {
+            return this.kind;
+        }
+
+        public String elementId() {
+            return this.elementId;
+        }
+
+        public String elementLabel() {
+            return this.elementLabel;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof ElementBinding)) {
+                return false;
+            }
+            ElementBinding other = (ElementBinding) o;
+            return this.kind == other.kind &&
+                   this.elementId.equals(other.elementId) &&
+                   this.elementLabel.equals(other.elementLabel);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(this.kind, this.elementId, this.elementLabel);
+        }
+
+        @Override
+        public String toString() {
+            return "ElementBinding{" + this.kind + " " + this.elementLabel +
+                   ":" + this.elementId + "}";
+        }
+    }
+
     public static final class Request {
 
         private final Operation operation;
@@ -61,11 +136,27 @@ public final class TemporalWrite {
         private final byte[] payload;
         private final String mutationId;
         private final int schemaVersion;
+        private final ElementBinding elementBinding;
 
         public Request(Operation operation, String graphId, String temporalLabel,
                        String entityId, TemporalFactKey factKey,
                        long validFrom, Long validTo, byte[] payload,
                        String mutationId, int schemaVersion) {
+            this(operation, graphId, temporalLabel, entityId, factKey, validFrom, validTo,
+                 payload, mutationId, schemaVersion, null);
+        }
+
+        /**
+         * Full constructor (Phase C): additionally carries an optional
+         * graph-element binding. {@code null} means unbound (current-only), the
+         * pre-Phase-C behavior. The binding is additive and never relaxes the
+         * half-open interval validation below.
+         */
+        public Request(Operation operation, String graphId, String temporalLabel,
+                       String entityId, TemporalFactKey factKey,
+                       long validFrom, Long validTo, byte[] payload,
+                       String mutationId, int schemaVersion,
+                       ElementBinding elementBinding) {
             if (validTo != null && validTo <= validFrom) {
                 throw new IllegalArgumentException(
                         "Half-open interval requires valid_to > valid_from");
@@ -81,6 +172,7 @@ public final class TemporalWrite {
                                            : Arrays.copyOf(payload, payload.length);
             this.mutationId = mutationId;
             this.schemaVersion = schemaVersion;
+            this.elementBinding = elementBinding;
         }
 
         public static Request append(String graph, String label, String entity,
@@ -153,6 +245,25 @@ public final class TemporalWrite {
 
         public int schemaVersion() {
             return this.schemaVersion;
+        }
+
+        /** Optional graph-element binding (Phase C); {@code null} when unbound. */
+        public ElementBinding elementBinding() {
+            return this.elementBinding;
+        }
+
+        /**
+         * Return a copy bound to a graph element (Phase C). Purely additive: the
+         * fact key, entity id, interval and idempotency fingerprint are unchanged,
+         * so a bound and an unbound request with the same fields apply identically
+         * on the interval views; the binding only drives the extra element-index
+         * write on the Store apply path.
+         */
+        public Request withElement(ElementKind kind, String elementId, String elementLabel) {
+            return new Request(this.operation, this.graphId, this.temporalLabel,
+                               this.entityId, this.factKey, this.validFrom, this.validTo,
+                               this.payload, this.mutationId, this.schemaVersion,
+                               new ElementBinding(kind, elementId, elementLabel));
         }
 
         public ColocationGroup group() {

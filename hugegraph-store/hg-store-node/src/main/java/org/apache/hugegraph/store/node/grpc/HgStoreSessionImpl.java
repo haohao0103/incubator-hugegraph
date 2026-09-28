@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.store.node.grpc;
 
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -41,6 +42,7 @@ import org.apache.hugegraph.store.grpc.session.GraphReq;
 import org.apache.hugegraph.store.grpc.session.HgStoreSessionGrpc;
 import org.apache.hugegraph.store.grpc.session.KeyValueResponse;
 import org.apache.hugegraph.store.grpc.session.TableReq;
+import org.apache.hugegraph.store.grpc.session.TemporalBundle;
 import org.apache.hugegraph.store.grpc.session.TemporalInterval;
 import org.apache.hugegraph.store.grpc.session.TemporalMutationReq;
 import org.apache.hugegraph.store.grpc.session.TemporalQueryReq;
@@ -392,18 +394,43 @@ public class HgStoreSessionImpl extends HgStoreSessionGrpc.HgStoreSessionImplBas
             }
         });
 
+        // Phase B: group bound temporal bundles by their owning partition and
+        // enforce co-location with a normal write in the same region. A temporal
+        // fact key resolves through PD exactly like a normal key; if it lands in
+        // a partition this batch does not otherwise write to, the normal write
+        // and its validity interval cannot share one Raft proposal, so the whole
+        // batch is rejected up front -- never partially submitted and never
+        // asynchronously patched.
+        Map<Integer, List<TemporalBundle>> temporalGroups = new HashMap<>();
+        for (TemporalBundle carried : request.getWriteReq().getTemporalBundleList()) {
+            int partitionId = pd.getPartitionByCode(graph, carried.getCode()).getId();
+            temporalGroups.computeIfAbsent(partitionId, k -> new LinkedList<>()).add(carried);
+        }
+        Integer crossRegion = findCrossRegionTemporalPartition(groups.keySet(),
+                                                               temporalGroups.keySet());
+        if (crossRegion != null) {
+            String msg = "TEMPORAL_CROSS_REGION_UNSUPPORTED: temporal fact partition " +
+                         crossRegion + " is not co-located with the normal write " +
+                         "partitions " + groups.keySet() + ", graph=" + graph;
+            log.error(msg);
+            observer.onNext(FeedbackRes.newBuilder().setStatus(HgGrpc.fail(msg)).build());
+            observer.onCompleted();
+            return;
+        }
         // Send to different raft to execute
         BatchGrpcClosure<FeedbackRes> closure =
                 new BatchGrpcClosure<>(groups.size());
         groups.forEach((partition, entries) -> {
+            BatchWriteReq.Builder writeReq = BatchWriteReq.newBuilder().addAllEntry(entries);
+            List<TemporalBundle> carried = temporalGroups.get(partition);
+            if (carried != null) {
+                writeReq.addAllTemporalBundle(carried);
+            }
             storeService.addRaftTask(HgStoreNodeService.BATCH_OP, graph,
                                      partition,
                                      BatchReq.newBuilder()
                                              .setHeader(request.getHeader())
-                                             .setWriteReq(
-                                                     BatchWriteReq.newBuilder()
-                                                                  .addAllEntry(
-                                                                          entries))
+                                             .setWriteReq(writeReq)
                                              .build(),
                                      closure.newRaftClosure());
         });
@@ -424,6 +451,26 @@ public class HgStoreSessionImpl extends HgStoreSessionGrpc.HgStoreSessionImplBas
         }
     }
 
+    /**
+     * Phase B co-location rule (pure, unit-testable seam of {@link #batch}).
+     * Every bound temporal bundle must resolve to a partition this batch already
+     * writes a normal entry to, so the normal write and its validity interval can
+     * share ONE Raft proposal / Store transaction. Returns the first offending
+     * temporal partition id, or {@code null} when all temporal bundles are
+     * co-located -- including the non-temporal case (empty
+     * {@code temporalPartitions}), which therefore never rejects and keeps the
+     * pre-Phase-B batch behavior unchanged.
+     */
+    static Integer findCrossRegionTemporalPartition(Collection<Integer> normalPartitions,
+                                                    Collection<Integer> temporalPartitions) {
+        for (Integer partitionId : temporalPartitions) {
+            if (!normalPartitions.contains(partitionId)) {
+                return partitionId;
+            }
+        }
+        return null;
+    }
+
     public void doBatch(int partId, BatchReq request, RaftClosure response) {
         String graph = request.getHeader().getGraph();
         String batchId = request.getBatchId();
@@ -440,7 +487,31 @@ public class HgStoreSessionImpl extends HgStoreSessionGrpc.HgStoreSessionImplBas
         GrpcClosure.setResult(response, builder.build());
     }
 
-    // private static HgBusinessHandler.Batch toBatch(BatchEntry entry) {
+    /**
+     * Phase B atomic commit apply entry. The batch carries temporal bundles that
+     * must land in the SAME store transaction as the normal entries, so the
+     * committed Raft {@code applyIndex} is threaded down as the temporal
+     * revision (leader and replaying followers persist identical bytes). Reached
+     * only for temporal-carrying batches; the plain
+     * {@link #doBatch(int, BatchReq, RaftClosure)} path is unchanged.
+     */
+    public void doBatch(int partId, BatchReq request, RaftClosure response, long applyIndex) {
+        String graph = request.getHeader().getGraph();
+        String batchId = request.getBatchId();
+        FeedbackRes.Builder builder = FeedbackRes.newBuilder();
+        List<BatchEntry> entries = request.getWriteReq().getEntryList();
+        List<TemporalBundle> temporalBundles = request.getWriteReq().getTemporalBundleList();
+        try {
+            getWrapper().doBatch(graph, partId, entries, temporalBundles, applyIndex);
+            builder.setStatus(HgGrpc.success());
+        } catch (Throwable t) {
+            String msg = "Failed to doBatch with temporal, graph: " + graph +
+                         "; batchId= " + batchId;
+            log.error(msg, t);
+            builder.setStatus(HgGrpc.fail(msg));
+        }
+        GrpcClosure.setResult(response, builder.build());
+    }
     //    return new HgBusinessHandler.Batch() {
     //        @Override
     //        public BatchOpType getOp() {

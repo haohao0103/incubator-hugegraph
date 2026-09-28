@@ -61,6 +61,22 @@ message BatchReq{
 
 message BatchWriteReq{
   repeated BatchEntry entry = 1;
+  // Phase B atomic commit: temporal mutation bundles bound to this batch's
+  // normal entries, so a normal write and its validity interval commit as one
+  // store transaction. Purely additive -- an empty list makes the request
+  // byte-for-byte identical to a pre-temporal batch write, and the field is
+  // ignored by any handler without the temporal capability.
+  repeated TemporalBundle temporal_bundle = 2;
+}
+
+// One temporal mutation carried inside a normal batch proposal (Phase B).
+// Mirrors TemporalMutationReq.bundle so the same codec applies.
+message TemporalBundle{
+  // Fact-key hash (PartitionUtils.calcHashcode(fact_key)) used by the temporal
+  // apply to resolve the key suffix and owning partition; kept for validation.
+  int32 code = 1;
+  // TemporalMutationBundleCodec-encoded bundle.
+  bytes bundle = 2;
 }
 
 message BatchCommitReq{}

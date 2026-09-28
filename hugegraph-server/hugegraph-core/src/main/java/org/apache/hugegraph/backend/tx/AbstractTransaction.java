@@ -317,9 +317,23 @@ public abstract class AbstractTransaction implements Transaction {
         for (BackendMutation mutation : mutations) {
             this.store.mutate(mutation);
         }
+        // Phase B atomic commit hook: contribute any accumulated temporal writes
+        // into the SAME backend transaction, after the normal mutations and
+        // before the single commit below. Default no-op, so non-temporal
+        // transactions take a byte-for-byte identical path.
+        this.flushPendingTemporalWrites();
         this.store.commitTx();
 
         this.committing2Backend = false;
+    }
+
+    /**
+     * Hook for subclasses to contribute extra writes into the current backend
+     * transaction window ({@code beginTx}..{@code commitTx}). The base
+     * implementation does nothing; only the temporal transaction overrides it.
+     */
+    protected void flushPendingTemporalWrites() {
+        // no-op by default
     }
 
     protected void rollbackBackend() {

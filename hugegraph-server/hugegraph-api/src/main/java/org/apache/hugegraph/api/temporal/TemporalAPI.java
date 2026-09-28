@@ -80,10 +80,12 @@ public class TemporalAPI extends API {
         long validFrom = TemporalTime.parse(mutation.validFrom);
         Long validTo = mutation.validTo == null ? null
                                                 : TemporalTime.parse(mutation.validTo);
-        TemporalWrite.Request request = new TemporalWrite.Request(
-                op, graph, mutation.temporalLabel, mutation.entityId, factKey,
-                validFrom, validTo, payload, mutation.mutationId,
-                TemporalSchemaVersionHolder.SCHEMA_VERSION);
+        TemporalWrite.Request request = applyElementBinding(
+                new TemporalWrite.Request(
+                        op, graph, mutation.temporalLabel, mutation.entityId, factKey,
+                        validFrom, validTo, payload, mutation.mutationId,
+                        TemporalSchemaVersionHolder.SCHEMA_VERSION),
+                mutation);
 
         commit(g, () -> {
             g.temporalMutate(request);
@@ -95,6 +97,11 @@ public class TemporalAPI extends API {
         result.put("temporal_label", mutation.temporalLabel);
         result.put("mutation_id", mutation.mutationId);
         result.put("operation", mutation.operation);
+        if (mutation.elementId != null && !mutation.elementId.isEmpty()) {
+            result.put("element_kind", mutation.elementKind);
+            result.put("element_id", mutation.elementId);
+            result.put("element_label", mutation.elementLabel);
+        }
         return result;
     }
 
@@ -144,6 +151,34 @@ public class TemporalAPI extends API {
         return g.temporalQuery(parsed, query);
     }
 
+    /**
+     * Phase C (additive): optionally bind the interval to a graph element so the
+     * Store also maintains {@code g+temporal_element_index} in the same atomic
+     * transaction. Absent {@code element_id} keeps the request unbound
+     * (current-only), byte-for-byte identical to the pre-Phase-C path. The
+     * binding never enters VertexId/EdgeId or id generation; it is pure metadata.
+     * Gating is inherited: the whole temporal path already requires a
+     * temporal-capable backend and the Store-side feature flag.
+     */
+    private static TemporalWrite.Request applyElementBinding(TemporalWrite.Request request,
+                                                             JsonTemporalMutation mutation) {
+        if (mutation.elementId == null || mutation.elementId.isEmpty()) {
+            return request;
+        }
+        E.checkArgument(mutation.elementKind != null && !mutation.elementKind.isEmpty(),
+                        "The element_kind can't be null or empty when element_id is set");
+        E.checkArgument(mutation.elementLabel != null && !mutation.elementLabel.isEmpty(),
+                        "The element_label can't be null or empty when element_id is set");
+        TemporalWrite.ElementKind kind;
+        try {
+            kind = TemporalWrite.ElementKind.valueOf(mutation.elementKind.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(
+                    "The element_kind must be vertex or edge, got: " + mutation.elementKind);
+        }
+        return request.withElement(kind, mutation.elementId, mutation.elementLabel);
+    }
+
     private static void checkMutation(JsonTemporalMutation mutation) {
         E.checkNotNull(mutation, "mutation");
         E.checkArgument(mutation.entityId != null && !mutation.entityId.isEmpty(),
@@ -180,6 +215,14 @@ public class TemporalAPI extends API {
         public String payload;
         @JsonProperty("operation")
         public String operation;
+        // Phase C (additive): optional graph-element binding. All three must be
+        // set together, or all absent (unbound, current-only).
+        @JsonProperty("element_kind")
+        public String elementKind;
+        @JsonProperty("element_id")
+        public String elementId;
+        @JsonProperty("element_label")
+        public String elementLabel;
     }
 
     /** Schema version carried by temporal mutations (wire protocol). */

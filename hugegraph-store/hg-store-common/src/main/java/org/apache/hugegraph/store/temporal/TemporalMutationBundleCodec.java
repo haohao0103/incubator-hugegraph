@@ -57,6 +57,12 @@ public final class TemporalMutationBundleCodec {
             writeBytes(out, view.value());
             out.writeLong(view.committedRevision());
         }
+        // Phase C (additive, CODEC_VERSION 3): optional graph-element binding.
+        // NONE writes kind byte 0 and two empty strings, so an unbound bundle
+        // round-trips to the identical current-only apply as before Phase C.
+        out.writeByte(bundle.elementKind().code());
+        writeText(out, bundle.elementId());
+        writeText(out, bundle.elementLabel());
         out.flush();
         return bytes.toByteArray();
     }
@@ -93,12 +99,18 @@ public final class TemporalMutationBundleCodec {
                                                                readBytes(in),
                                                                in.readLong()));
         }
+        // Phase C (additive, CODEC_VERSION 3): optional graph-element binding.
+        TemporalMutationBundle.ElementKind elementKind =
+                TemporalMutationBundle.ElementKind.fromCode(in.readUnsignedByte());
+        String elementId = readText(in);
+        String elementLabel = readText(in);
         if (in.available() != 0) {
             throw new IOException("trailing bytes in temporal bundle: " + in.available());
         }
         return new TemporalMutationBundle(operation, graph, label, entity, factKey,
                                           mutationId, schemaVersion, validFrom, validTo,
-                                          open, payload, views);
+                                          open, payload, views, elementKind, elementId,
+                                          elementLabel);
     }
 
     private static void writeText(DataOutputStream out, String value) throws IOException {

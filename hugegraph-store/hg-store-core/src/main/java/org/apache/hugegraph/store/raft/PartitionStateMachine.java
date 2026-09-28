@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.store.raft;
 
+import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
@@ -25,6 +26,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.hugegraph.store.HgStoreEngine;
 import org.apache.hugegraph.store.snapshot.SnapshotHandler;
+import org.apache.hugegraph.store.temporal.TemporalMutationHandler;
 import org.apache.hugegraph.store.util.HgRaftError;
 import org.apache.hugegraph.store.util.HgStoreException;
 
@@ -83,21 +85,21 @@ public class PartitionStateMachine extends StateMachineAdapter {
 
     @Override
     public void onApply(Iterator iter) {
-        log.info("temporal apply-loop stateMachineId={} groupId={} thread={} index={}",
-                 System.identityHashCode(this), groupId, Thread.currentThread().getName(),
-                 iter.getIndex());
         applyLock.lock();
         try {
             while (iter.hasNext()) {
                 final DefaultRaftClosure done = (DefaultRaftClosure) iter.done();
-                // Instrumentation (Slice 1 condition 3): emit the raft-state fields
-                // per applied entry so the verifier can join term / isLeader onto the
-                // temporal apply-entry line by (groupId, index). term/isLeader are the
-                // discriminating fields for the leader-switch variant: they tell whether
-                // a decision was applied on the old or new leader.
-                log.info("raft apply context groupId={} index={} term={} isLeader={} " +
-                         "stateMachineId={}", groupId, iter.getIndex(), iter.getTerm(),
-                         isLeader(), System.identityHashCode(this));
+                // Temporal entries are tagged with the temporal op byte; scoping the
+                // temporal diagnostics and wire-protocol handling to them keeps the
+                // non-temporal apply path identical to the pre-temporal behavior (no
+                // per-apply INFO logging, silent skip of unhandled legacy ops and the
+                // legacy error logging).
+                final boolean temporalOp = isTemporalOp(done, iter);
+                if (temporalOp) {
+                    log.debug("temporal apply context groupId={} index={} term={} " +
+                              "isLeader={} stateMachineId={}", groupId, iter.getIndex(),
+                              iter.getTerm(), isLeader(), System.identityHashCode(this));
+                }
                 try {
                 boolean handled = false;
                 for (RaftTaskHandler handler : taskHandlers) {
@@ -118,28 +120,29 @@ public class PartitionStateMachine extends StateMachineAdapter {
                         }
                     }
                 }
-                if (!handled) {
-                    // Wire protocol ruling §5.1: unknown/unhandled op must fail
-                    // explicitly instead of being silently skipped. The catch
-                    // below records it and the caller observes a failure/timeout.
+                if (!handled && temporalOp) {
+                    // Wire protocol ruling §5.1: an unhandled temporal op must fail
+                    // explicitly instead of being silently skipped. Legacy
+                    // (non-temporal) ops keep the original silent-skip behavior so
+                    // the non-temporal apply path is unchanged.
                     throw new HgStoreException(
                             HgStoreException.EC_TEMPORAL_UNSUPPORTED_VERSION,
-                            "no handler for raft op, explicit fail instead of " +
-                            "silent skip");
+                            "no handler for temporal raft op, explicit fail " +
+                            "instead of silent skip");
                 }
             } catch (Throwable t) {
-                // A temporal apply can deterministically REJECT a mutation
-                // (interval conflict) or refuse an unsupported wire version.
-                // These are EXPECTED business outcomes, decided identically on
-                // every replica -- they are NOT StateMachine critical errors and
-                // must not be logged as such (Slice 1 replay condition 2: zero
-                // critical errors on conflict rounds), nor may the raft entry
-                // payload be dumped at INFO (L1a). Classify them and surface a
-                // specific raft code (L1b) so the client sees a clean rejection
-                // instead of UNKNOWN tripping the getErrorResponse() default.
                 RaftClosure closure = (done != null) ? done.getClosure() : null;
-                if (t instanceof HgStoreException &&
+                if (temporalOp && t instanceof HgStoreException &&
                     isTemporalBusinessRejection(((HgStoreException) t).getCode())) {
+                    // A temporal apply can deterministically REJECT a mutation
+                    // (interval conflict) or refuse an unsupported wire version.
+                    // These are EXPECTED business outcomes, decided identically on
+                    // every replica -- they are NOT StateMachine critical errors and
+                    // must not be logged as such (Slice 1 replay condition 2: zero
+                    // critical errors on conflict rounds), nor may the raft entry
+                    // payload be dumped at INFO (L1a). Classify them and surface a
+                    // specific raft code (L1b) so the client sees a clean rejection
+                    // instead of UNKNOWN tripping the getErrorResponse() default.
                     HgStoreException e = (HgStoreException) t;
                     log.warn("temporal apply rejected groupId={} index={} code={} msg={}",
                              groupId, iter.getIndex(), e.getCode(), e.getMessage());
@@ -147,7 +150,7 @@ public class PartitionStateMachine extends StateMachineAdapter {
                         closure.run(new Status(temporalRaftError(e.getCode()).getNumber(),
                                                e.getMessage() + " code=" + e.getCode()));
                     }
-                } else {
+                } else if (temporalOp) {
                     log.error(String.format("StateMachine %s meet critical error:", groupId), t);
                     if (done != null) {
                         log.error("StateMachine meet critical error: op = {} {}.",
@@ -165,6 +168,17 @@ public class PartitionStateMachine extends StateMachineAdapter {
                         closure.run(new Status(HgRaftError.UNKNOWN.getNumber(),
                                                String.valueOf(t.getMessage())));
                     }
+                } else {
+                    // Legacy non-temporal error path: preserve the pre-temporal
+                    // behavior exactly (payload dump + critical error logs, no
+                    // closure.run) so non-temporal semantics are unchanged.
+                    log.info("{}", Base64.getEncoder().encode(iter.getData().array()));
+                    log.error(String.format("StateMachine %s meet critical error:", groupId), t);
+                    if (done != null) {
+                        log.error("StateMachine meet critical error: op = {} {}.",
+                                  done.getOperation().getOp(),
+                                  done.getOperation().getReq());
+                    }
                 }
             }
             committedIndex = iter.getIndex();
@@ -179,6 +193,26 @@ public class PartitionStateMachine extends StateMachineAdapter {
         } finally {
             applyLock.unlock();
         }
+    }
+
+    /**
+     * Whether this raft entry carries a temporal mutation. Temporal requests are
+     * tagged with the {@link TemporalMutationHandler#TEMPORAL_MUTATION} op byte,
+     * so the temporal wire-protocol handling (explicit fail on unhandled op and
+     * business-rejection classification) can be scoped to temporal entries only,
+     * leaving the non-temporal apply path identical to its pre-temporal behavior.
+     */
+    private boolean isTemporalOp(DefaultRaftClosure done, Iterator iter) {
+        if (done != null) {
+            RaftOperation operation = done.getOperation();
+            return operation != null &&
+                   operation.getOp() == TemporalMutationHandler.TEMPORAL_MUTATION;
+        }
+        java.nio.ByteBuffer data = iter.getData();
+        if (data == null || !data.hasRemaining()) {
+            return false;
+        }
+        return data.get(data.position()) == TemporalMutationHandler.TEMPORAL_MUTATION;
     }
 
     public long getCommittedIndex() {
@@ -198,7 +232,8 @@ public class PartitionStateMachine extends StateMachineAdapter {
     private static boolean isTemporalBusinessRejection(int code) {
         return code == HgStoreException.EC_TEMPORAL_CONFLICT ||
                code == HgStoreException.EC_TEMPORAL_UNSUPPORTED_VERSION ||
-               code == HgStoreException.EC_TEMPORAL_CLOSED_INTERVAL_CONFLICT;
+               code == HgStoreException.EC_TEMPORAL_CLOSED_INTERVAL_CONFLICT ||
+               code == HgStoreException.EC_TEMPORAL_CROSS_REGION_UNSUPPORTED;
     }
 
     /** Map a temporal business-rejection code onto its dedicated raft error. */
@@ -208,6 +243,9 @@ public class PartitionStateMachine extends StateMachineAdapter {
         }
         if (code == HgStoreException.EC_TEMPORAL_CLOSED_INTERVAL_CONFLICT) {
             return HgRaftError.TEMPORAL_CLOSED_INTERVAL_CONFLICT;
+        }
+        if (code == HgStoreException.EC_TEMPORAL_CROSS_REGION_UNSUPPORTED) {
+            return HgRaftError.TEMPORAL_CROSS_REGION_UNSUPPORTED;
         }
         return HgRaftError.TEMPORAL_UNSUPPORTED_VERSION;
     }

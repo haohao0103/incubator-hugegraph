@@ -29,6 +29,8 @@ import org.apache.hugegraph.store.business.FilterIterator;
 import org.apache.hugegraph.store.grpc.common.GraphMethod;
 import org.apache.hugegraph.store.grpc.common.TableMethod;
 import org.apache.hugegraph.store.grpc.session.BatchEntry;
+import org.apache.hugegraph.store.grpc.session.TemporalBundle;
+import org.apache.hugegraph.store.temporal.TemporalMutationHandler;
 import org.apache.hugegraph.store.term.HgPair;
 
 import lombok.extern.slf4j.Slf4j;
@@ -37,9 +39,14 @@ import lombok.extern.slf4j.Slf4j;
 public class HgStoreWrapperEx {
 
     private final BusinessHandler handler;
+    // Contributes batch-carried temporal bundles into the shared batch
+    // transaction (Phase B atomic commit). Stateless apart from the handler
+    // reference, so a single instance is reused for the wrapper's lifetime.
+    private final TemporalMutationHandler temporalHandler;
 
     public HgStoreWrapperEx(BusinessHandler handler) {
         this.handler = handler;
+        this.temporalHandler = new TemporalMutationHandler(handler);
     }
 
     public byte[] doGet(String graph, int code, String table, byte[] key) {
@@ -80,6 +87,18 @@ public class HgStoreWrapperEx {
 
     public void doBatch(String graph, int partId, List<BatchEntry> entryList) {
         this.handler.doBatch(graph, partId, entryList);
+    }
+
+    /**
+     * Phase B atomic commit: write the normal batch entries and the bound
+     * temporal bundles into a single store transaction (one commit). Only
+     * reached when the batch actually carries temporal bundles; the plain
+     * {@link #doBatch(String, int, List)} path is untouched otherwise.
+     */
+    public void doBatch(String graph, int partId, List<BatchEntry> entryList,
+                        List<TemporalBundle> temporalBundles, long applyIndex) {
+        this.handler.doBatch(graph, partId, entryList, temporalBundles, applyIndex,
+                             this.temporalHandler);
     }
 
     public boolean doTable(int partId, TableMethod method, String graph, String table) {

@@ -17,6 +17,7 @@
 
 package org.apache.hugegraph.store.business;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -35,11 +36,15 @@ import org.apache.hugegraph.store.grpc.common.Key;
 import org.apache.hugegraph.store.grpc.common.OpType;
 import org.apache.hugegraph.store.grpc.query.DeDupOption;
 import org.apache.hugegraph.store.grpc.session.BatchEntry;
+import org.apache.hugegraph.store.grpc.session.TemporalBundle;
 import org.apache.hugegraph.store.meta.base.DBSessionBuilder;
 import org.apache.hugegraph.store.metric.HgStoreMetric;
 import org.apache.hugegraph.store.query.QueryTypeParam;
 import org.apache.hugegraph.store.raft.PartitionStateMachine;
 import org.apache.hugegraph.store.term.HgPair;
+import org.apache.hugegraph.store.temporal.TemporalMutationBundle;
+import org.apache.hugegraph.store.temporal.TemporalMutationBundleCodec;
+import org.apache.hugegraph.store.temporal.TemporalMutationHandler;
 import org.apache.hugegraph.store.util.HgStoreException;
 import org.rocksdb.Cache;
 import org.rocksdb.MemoryUsageType;
@@ -153,38 +158,7 @@ public interface BusinessHandler extends DBSessionBuilder {
     default void doBatch(String graph, int partId, List<BatchEntry> entryList) {
         BusinessHandler.TxBuilder builder = txBuilder(graph, partId);
         try {
-            for (BatchEntry b : entryList) {
-                Key start = b.getStartKey();
-                String table = HugeServerTables.TABLES[b.getTable()];
-                byte[] startKey = start.getKey().toByteArray();
-                int number = b.getOpType().getNumber();
-                if (number == OpType.OP_TYPE_PUT_VALUE) {
-                    builder.put(start.getCode(), table, startKey, b.getValue().toByteArray());
-                } else {
-                    switch (number) {
-                        case OpType.OP_TYPE_DEL_VALUE:
-                            builder.del(start.getCode(), table, startKey);
-                            continue;
-                        case OpType.OP_TYPE_DEL_PREFIX_VALUE:
-                            builder.delPrefix(start.getCode(), table, startKey);
-                            continue;
-                        case OpType.OP_TYPE_DEL_RANGE_VALUE:
-                            builder.delRange(start.getCode(), table, startKey,
-                                             b.getEndKey().getKey().toByteArray());
-                            continue;
-                        case OpType.OP_TYPE_DEL_SINGLE_VALUE:
-                            builder.delSingle(start.getCode(), table, startKey);
-                            continue;
-                        case OpType.OP_TYPE_MERGE_VALUE:
-                            builder.merge(start.getCode(), table, startKey,
-                                          b.getValue().toByteArray());
-                            continue;
-                        default:
-                            throw new IllegalArgumentException(
-                                    "unsupported batch-op-type: " + b.getOpType().name());
-                    }
-                }
-            }
+            applyBatchEntries(builder, entryList);
             builder.build().commit();
         } catch (Throwable e) {
             String msg =
@@ -192,6 +166,86 @@ public interface BusinessHandler extends DBSessionBuilder {
             log.error(msg, e);
             builder.build().rollback();
             throw e;
+        }
+    }
+
+    /**
+     * Phase B atomic commit: apply a normal batch and its bound temporal
+     * mutation bundles in ONE store transaction. The normal entries and the
+     * temporal views share a single {@link TxBuilder} and are committed once, so
+     * a crash leaves both the normal write and its validity interval visible
+     * together or not at all -- never a partial or asynchronously patched
+     * state. Purely additive: a caller without temporal bundles keeps using
+     * {@link #doBatch(String, int, List)} and its behavior is unchanged.
+     *
+     * <p>{@code applyIndex} is the committed Raft log index, threaded into the
+     * temporal views as their revision so the leader and replaying followers
+     * persist identical bytes.
+     */
+    default void doBatch(String graph, int partId, List<BatchEntry> entryList,
+                         List<TemporalBundle> temporalBundles, long applyIndex,
+                         TemporalMutationHandler temporalHandler) {
+        BusinessHandler.TxBuilder builder = txBuilder(graph, partId);
+        try {
+            applyBatchEntries(builder, entryList);
+            if (temporalBundles != null) {
+                for (TemporalBundle carried : temporalBundles) {
+                    TemporalMutationBundle bundle;
+                    try {
+                        bundle = TemporalMutationBundleCodec.decode(
+                                carried.getBundle().toByteArray());
+                    } catch (IOException e) {
+                        throw new HgStoreException(
+                                HgStoreException.EC_TEMPORAL_UNSUPPORTED_VERSION,
+                                "TEMPORAL_UNSUPPORTED_VERSION batch-carried bundle decode", e);
+                    }
+                    temporalHandler.contribute(partId, bundle, builder, applyIndex);
+                }
+            }
+            builder.build().commit();
+        } catch (Throwable e) {
+            String msg = String.format(
+                    "graph data %s-%s do batch insert with temporal error:", graph, partId);
+            log.error(msg, e);
+            builder.build().rollback();
+            throw e;
+        }
+    }
+
+    /** Apply the normal batch entries into {@code builder} (no commit). */
+    private void applyBatchEntries(BusinessHandler.TxBuilder builder,
+                                   List<BatchEntry> entryList) {
+        for (BatchEntry b : entryList) {
+            Key start = b.getStartKey();
+            String table = HugeServerTables.TABLES[b.getTable()];
+            byte[] startKey = start.getKey().toByteArray();
+            int number = b.getOpType().getNumber();
+            if (number == OpType.OP_TYPE_PUT_VALUE) {
+                builder.put(start.getCode(), table, startKey, b.getValue().toByteArray());
+            } else {
+                switch (number) {
+                    case OpType.OP_TYPE_DEL_VALUE:
+                        builder.del(start.getCode(), table, startKey);
+                        continue;
+                    case OpType.OP_TYPE_DEL_PREFIX_VALUE:
+                        builder.delPrefix(start.getCode(), table, startKey);
+                        continue;
+                    case OpType.OP_TYPE_DEL_RANGE_VALUE:
+                        builder.delRange(start.getCode(), table, startKey,
+                                         b.getEndKey().getKey().toByteArray());
+                        continue;
+                    case OpType.OP_TYPE_DEL_SINGLE_VALUE:
+                        builder.delSingle(start.getCode(), table, startKey);
+                        continue;
+                    case OpType.OP_TYPE_MERGE_VALUE:
+                        builder.merge(start.getCode(), table, startKey,
+                                      b.getValue().toByteArray());
+                        continue;
+                    default:
+                        throw new IllegalArgumentException(
+                                "unsupported batch-op-type: " + b.getOpType().name());
+                }
+            }
         }
     }
 

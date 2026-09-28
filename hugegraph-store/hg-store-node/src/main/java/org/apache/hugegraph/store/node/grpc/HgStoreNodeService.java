@@ -230,6 +230,74 @@ public class HgStoreNodeService implements RaftTaskHandler {
     }
 
     /**
+     * Apply a committed entry with its exact Raft log index (Phase B). Only a
+     * batch that carries temporal bundles needs the index (it becomes the
+     * temporal revision); every other op -- and any batch without temporal
+     * bundles -- follows the legacy index-dropping path unchanged, so the
+     * non-temporal apply behavior is byte-for-byte preserved.
+     */
+    @Override
+    public boolean invoke(int partId, byte[] request, RaftClosure response, long applyIndex)
+            throws HgStoreException {
+        try {
+            CodedInputStream input = CodedInputStream.newInstance(request);
+            byte methodId = input.readRawByte();
+            switch (methodId) {
+                case HgStoreNodeService.BATCH_OP:
+                    BatchReq batchReq = BatchReq.parseFrom(input);
+                    if (hasTemporalBundles(batchReq)) {
+                        hgStoreSession.doBatch(partId, batchReq, response, applyIndex);
+                    } else {
+                        invoke(partId, methodId, batchReq, response);
+                    }
+                    break;
+                case HgStoreNodeService.TABLE_OP:
+                    invoke(partId, methodId, TableReq.parseFrom(input), response);
+                    break;
+                case HgStoreNodeService.GRAPH_OP:
+                    invoke(partId, methodId, GraphReq.parseFrom(input), response);
+                    break;
+                case HgStoreNodeService.CLEAN_OP:
+                    invoke(partId, methodId, CleanReq.parseFrom(input), response);
+                    break;
+                default:
+                    return false; // Unhandled
+            }
+        } catch (IOException e) {
+            throw new HgStoreException(e.getMessage(), e);
+        }
+        return true;
+    }
+
+    /**
+     * Leader-side apply with the exact Raft log index (Phase B). Threads the
+     * index into a temporal-carrying batch; everything else defers to the legacy
+     * index-dropping overload so non-temporal behavior is unchanged.
+     */
+    @Override
+    public boolean invoke(int partId, byte methodId, Object req, RaftClosure response,
+                          long applyIndex) throws HgStoreException {
+        if (methodId == HgStoreNodeService.BATCH_OP && req instanceof BatchReq &&
+            hasTemporalBundles((BatchReq) req)) {
+            hgStoreSession.doBatch(partId, (BatchReq) req, response, applyIndex);
+            return true;
+        }
+        return invoke(partId, methodId, req, response);
+    }
+
+    /**
+     * Whether a batch write carries bound temporal bundles. Purely additive: a
+     * batch without bundles (the only kind a pre-temporal client can send) takes
+     * the unchanged legacy path. Not gated on the feature flag on purpose --
+     * replay of an already-committed temporal batch must stay deterministic even
+     * if a node restarts with the flag off.
+     */
+    private static boolean hasTemporalBundles(BatchReq req) {
+        return req.getRequestsCase() == BatchReq.RequestsCase.WRITE_REQ &&
+               req.getWriteReq().getTemporalBundleCount() > 0;
+    }
+
+    /**
      * Internal Server&lt;-&gt;Store temporal transport (design ruling §5.1).
      *
      * Not a public client API. Submits a temporal bundle as a Raft operation on

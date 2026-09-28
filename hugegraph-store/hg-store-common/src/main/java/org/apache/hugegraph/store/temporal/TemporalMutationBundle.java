@@ -30,7 +30,7 @@ import java.util.Objects;
  */
 public final class TemporalMutationBundle {
 
-    public static final int CODEC_VERSION = 2;
+    public static final int CODEC_VERSION = 3;
 
     /** Wire operation codes; kept as explicit bytes so the wire is stable. */
     public enum Operation {
@@ -60,6 +60,38 @@ public final class TemporalMutationBundle {
         }
     }
 
+    /**
+     * Optional graph-element binding kind (Phase C). {@link #NONE} means the
+     * bundle is not bound to any Vertex/Edge, so the Store writes no
+     * element-index entry and the mutation stays current-only (identical to the
+     * pre-Phase-C path). Wire codes are explicit bytes so the wire is stable.
+     */
+    public enum ElementKind {
+
+        NONE((byte) 0),
+        VERTEX((byte) 1),
+        EDGE((byte) 2);
+
+        private final byte code;
+
+        ElementKind(byte code) {
+            this.code = code;
+        }
+
+        public byte code() {
+            return this.code;
+        }
+
+        public static ElementKind fromCode(int code) {
+            for (ElementKind kind : values()) {
+                if (kind.code() == (byte) code) {
+                    return kind;
+                }
+            }
+            throw new IllegalArgumentException("unknown temporal element kind code: " + code);
+        }
+    }
+
     private final Operation operation;
     private final String graph;
     private final String temporalLabel;
@@ -72,6 +104,9 @@ public final class TemporalMutationBundle {
     private final boolean open;
     private final byte[] payload;
     private final List<ViewMutation> views;
+    private final ElementKind elementKind;
+    private final String elementId;
+    private final String elementLabel;
 
     /**
      * Interval-creating bundle (APPEND/UPSERT). Kept for source compatibility:
@@ -89,6 +124,26 @@ public final class TemporalMutationBundle {
                                   String entityId, byte[] factKey, String mutationId,
                                   int schemaVersion, long validFrom, long validTo,
                                   boolean open, byte[] payload, List<ViewMutation> views) {
+        this(operation, graph, temporalLabel, entityId, factKey, mutationId, schemaVersion,
+             validFrom, validTo, open, payload, views, ElementKind.NONE, null, null);
+    }
+
+    /**
+     * Full constructor (Phase C): additionally carries an optional graph-element
+     * binding (kind + id + label). When {@code elementKind} is
+     * {@link ElementKind#NONE} the bundle is unbound and the Store writes no
+     * element-index entry (current-only, identical to the pre-Phase-C path); the
+     * element id / label are then normalized to empty. A bound bundle requires a
+     * non-empty element id and label. The binding never enters the interval views
+     * (still exactly four for APPEND/UPSERT, zero for CLOSE/DELETE): the Store
+     * derives the element-index write from it, so the frozen view invariant holds.
+     */
+    public TemporalMutationBundle(Operation operation, String graph, String temporalLabel,
+                                  String entityId, byte[] factKey, String mutationId,
+                                  int schemaVersion, long validFrom, long validTo,
+                                  boolean open, byte[] payload, List<ViewMutation> views,
+                                  ElementKind elementKind, String elementId,
+                                  String elementLabel) {
         this.operation = Objects.requireNonNull(operation, "operation");
         this.graph = requireText(graph, "graph");
         this.temporalLabel = requireText(temporalLabel, "temporalLabel");
@@ -118,6 +173,14 @@ public final class TemporalMutationBundle {
             throw new IllegalArgumentException(
                     "close/delete bundle must contain zero views");
         }
+        this.elementKind = Objects.requireNonNull(elementKind, "elementKind");
+        if (this.elementKind == ElementKind.NONE) {
+            this.elementId = "";
+            this.elementLabel = "";
+        } else {
+            this.elementId = requireText(elementId, "elementId");
+            this.elementLabel = requireText(elementLabel, "elementLabel");
+        }
     }
 
     public Operation operation() { return operation; }
@@ -132,6 +195,12 @@ public final class TemporalMutationBundle {
     public boolean open() { return open; }
     public byte[] payload() { return payload.clone(); }
     public List<ViewMutation> views() { return views; }
+    public ElementKind elementKind() { return elementKind; }
+    public String elementId() { return elementId; }
+    public String elementLabel() { return elementLabel; }
+
+    /** Whether this bundle is bound to a graph element (drives the element-index write). */
+    public boolean hasElementBinding() { return elementKind != ElementKind.NONE; }
 
     private static String requireText(String value, String name) {
         if (value == null || value.isEmpty()) {

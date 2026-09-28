@@ -43,6 +43,8 @@ public enum HgRaftError {
     TEMPORAL_CONFLICT(22000, "temporal fact interval conflict"),
     TEMPORAL_UNSUPPORTED_VERSION(22001, "temporal unsupported wire version"),
     TEMPORAL_CLOSED_INTERVAL_CONFLICT(22002, "temporal closed interval conflict"),
+    TEMPORAL_CROSS_REGION_UNSUPPORTED(22003,
+            "temporal atomic commit requires the normal and temporal write to be co-located"),
     END(30000, "HgStore error is end");
 
     private static final Map<Integer, HgRaftError> RAFT_ERROR_MAP = new HashMap<>();

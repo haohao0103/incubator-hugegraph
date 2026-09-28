@@ -42,6 +42,11 @@ public class HgStoreException extends RuntimeException {
     public static final int EC_TEMPORAL_UNSUPPORTED_VERSION = 1502;
     public static final int EC_TEMPORAL_QUERY_LIMIT_EXCEEDED = 1503;
     public static final int EC_TEMPORAL_CLOSED_INTERVAL_CONFLICT = 1504;
+    // Phase B atomic commit: a normal mutation and its bound temporal validity
+    // write must be co-located in one partition to commit as a single store
+    // transaction. When they resolve to different regions the request is rejected
+    // explicitly -- never partially committed and never asynchronously patched.
+    public static final int EC_TEMPORAL_CROSS_REGION_UNSUPPORTED = 1505;
     private static final long serialVersionUID = 5193624480997934335L;
     private final int code;
 

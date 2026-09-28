@@ -36,6 +36,11 @@ public class HugeServerTables {
     public static final String TEMPORAL_CURRENT_TABLE = "g+temporal_current";
     public static final String TEMPORAL_OPEN_INDEX_TABLE = "g+temporal_open_index";
     public static final String TEMPORAL_INDEX_TABLE = "g+temporal_index";
+    // Phase C: element_id -> valid-interval index, written atomically with the
+    // interval views (same fact-key hash code / same Store transaction). Like the
+    // other temporal tables it is addressed by name and stays outside TABLES /
+    // TABLES_MAP so the ordinary table mapping is untouched (red line).
+    public static final String TEMPORAL_ELEMENT_INDEX_TABLE = "g+temporal_element_index";
 
     public static final String[] TABLES = new String[]{UNKNOWN_TABLE, VERTEX_TABLE,
             OUT_EDGE_TABLE, IN_EDGE_TABLE,

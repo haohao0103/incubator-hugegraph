@@ -520,25 +520,75 @@ public class GraphTransaction extends IndexableTransaction {
     @Override
     public void commit() throws BackendException {
         try {
+            boolean hasNormalUpdate = this.hasUpdate();
             super.commit();
+            if (!hasNormalUpdate) {
+                // Temporal-only transaction: no normal mutation to co-locate
+                // with, so dispatch the accumulated bundles directly (the
+                // session is in auto-commit -> standalone temporal RPC), which
+                // preserves the pre-Phase-B behavior for temporal-only writes.
+                this.flushTemporalOnly();
+            }
         } finally {
             this.locksTable.unlock();
         }
     }
 
+    // Phase B: temporal writes accumulated into the current transaction, flushed
+    // on commit either merged into the normal backend tx (atomic) or dispatched
+    // directly when the transaction carries no normal write.
+    private final List<TemporalWrite.Request> pendingTemporalWrites = new ArrayList<>();
+
     /**
-     * Accumulate one interval-creating temporal mutation (APPEND/UPSERT). The
-     * final idempotency/conflict decision stays on the Store apply path; the
-     * transaction only validates the interval shape and dispatches on commit.
+     * Accumulate one temporal mutation into the current transaction. On commit
+     * the accumulated bundles are flushed into the SAME backend transaction as
+     * the normal mutations (merged batch, atomic all-or-nothing); when the
+     * transaction carries no normal write they are dispatched directly, exactly
+     * as before Phase B. The final idempotency/conflict decision stays on the
+     * Store apply path. A non-capable store is rejected explicitly here.
      */
     public void temporalMutate(TemporalWrite.Request request) {
         E.checkNotNull(request, "request");
-        // Dispatch immediately: the temporal mutation is its own Raft proposal
-        // on the Store (the batch+temporal single-proposal merge is a later
-        // hardening item), so it is submitted through the temporal backend
-        // capability right away rather than accumulated into the ordinary
-        // commit. A non-capable store is rejected explicitly.
-        TemporalBackendStore.require(this.store()).temporalMutate(request);
+        // Fail fast on a non-capable backend (explicit TEMPORAL_UNSUPPORTED).
+        TemporalBackendStore.require(this.store());
+        this.checkOwnerThread();
+        this.pendingTemporalWrites.add(request);
+        if (this.autoCommit()) {
+            // Auto-commit transactions have no explicit commit() call; mirror the
+            // previous immediate-dispatch semantics so callers that never commit
+            // still persist the write.
+            this.flushTemporalOnly();
+        }
+    }
+
+    /**
+     * Backend-tx hook (Phase B): contribute the accumulated temporal writes into
+     * the current backend transaction window so they commit atomically with the
+     * normal mutations. Called between {@code beginTx} and {@code commitTx}; the
+     * store buffers each bundle into the session batch.
+     */
+    @Override
+    protected void flushPendingTemporalWrites() {
+        if (this.pendingTemporalWrites.isEmpty()) {
+            return;
+        }
+        TemporalBackendStore store = TemporalBackendStore.require(this.store());
+        for (TemporalWrite.Request request : this.pendingTemporalWrites) {
+            store.temporalMutate(request);
+        }
+        this.pendingTemporalWrites.clear();
+    }
+
+    /** Dispatch accumulated temporal writes outside a backend tx (standalone). */
+    private void flushTemporalOnly() {
+        if (this.pendingTemporalWrites.isEmpty()) {
+            return;
+        }
+        TemporalBackendStore store = TemporalBackendStore.require(this.store());
+        for (TemporalWrite.Request request : this.pendingTemporalWrites) {
+            store.temporalMutate(request);
+        }
+        this.pendingTemporalWrites.clear();
     }
 
     /**

@@ -150,6 +150,7 @@ class BatchGrpcClosure<V> {
                 case TEMPORAL_CONFLICT:
                 case TEMPORAL_UNSUPPORTED_VERSION:
                 case TEMPORAL_CLOSED_INTERVAL_CONFLICT:
+                case TEMPORAL_CROSS_REGION_UNSUPPORTED:
                     // Slice 1 L1b: a temporal business rejection is not a
                     // partition fault. There is no dedicated PartitionFaultType,
                     // so keep UNKNOWN, but do NOT emit an ERROR "Unmatchable
