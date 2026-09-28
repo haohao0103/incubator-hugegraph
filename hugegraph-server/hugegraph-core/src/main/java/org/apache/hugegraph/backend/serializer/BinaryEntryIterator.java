@@ -18,6 +18,7 @@
 package org.apache.hugegraph.backend.serializer;
 
 import java.lang.ref.Cleaner;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiFunction;
 
@@ -49,35 +50,48 @@ public class BinaryEntryIterator<Elem> extends BackendEntryIterator {
      */
     private static final class CleaningState implements Runnable {
 
-        // The safety net releases the resource eagerly on GC. Logging a WARN on
-        // every occurrence floods the log and slows I/O, so only emit WARN every
-        // N occurrences (DEBUG otherwise). The eager close() paths (limit /
-        // exhaustion) should make this fire only for genuinely abandoned
-        // iterators.
+        // Logging a WARN on every occurrence floods the log and slows I/O, so
+        // only emit WARN every N occurrences (DEBUG otherwise). Only genuinely
+        // abandoned iterators (cleaned by GC without an explicit close) are
+        // counted; an explicit close() runs the action synchronously via
+        // cleanable.clean() and must not be mistaken for a leak.
         private static final AtomicLong CLEANED_COUNT = new AtomicLong();
         private static final long WARN_EVERY = 100L;
 
         private final BackendIterator<?> results;
+        /**
+         * Set by doClose() before clean() so run() can tell the synchronous
+         * explicit-close invocation apart from a GC-triggered cleanup.
+         */
+        private final AtomicBoolean explicitlyClosed = new AtomicBoolean(false);
 
         CleaningState(BackendIterator<?> results) {
             this.results = results;
         }
 
+        void markExplicitClose() {
+            this.explicitlyClosed.set(true);
+        }
+
         @Override
         public void run() {
+            if (!this.explicitlyClosed.get()) {
+                // Reached via the Cleaner after the iterator became
+                // unreachable: a genuinely abandoned/leaked iterator.
+                long count = CLEANED_COUNT.incrementAndGet();
+                if (count % WARN_EVERY == 0L) {
+                    LOG.warn("BinaryEntryIterator cleaned without explicit " +
+                             "close ({} occurrences total). This indicates a " +
+                             "resource leak path was triggered, likely due to " +
+                             "an interrupted/timeout query.", count);
+                } else {
+                    LOG.debug("BinaryEntryIterator cleaned without explicit " +
+                              "close (occurrence {}).", count);
+                }
+            }
             if (this.results != null) {
                 try {
                     this.results.close();
-                    long count = CLEANED_COUNT.incrementAndGet();
-                    if (count % WARN_EVERY == 0L) {
-                        LOG.warn("BinaryEntryIterator cleaned without explicit " +
-                                 "close ({} occurrences total). This indicates a " +
-                                 "resource leak path was triggered, likely due to " +
-                                 "an interrupted/timeout query.", count);
-                    } else {
-                        LOG.debug("BinaryEntryIterator cleaned without explicit " +
-                                  "close (occurrence {}).", count);
-                    }
                 } catch (Exception ignored) {
                     // Cleaner action must not throw
                 }
@@ -90,6 +104,7 @@ public class BinaryEntryIterator<Elem> extends BackendEntryIterator {
 
     protected BackendEntry next;
 
+    private final CleaningState state;
     private final Cleaner.Cleanable cleanable;
     private volatile boolean closed;
 
@@ -107,7 +122,8 @@ public class BinaryEntryIterator<Elem> extends BackendEntryIterator {
 
         // Register with Cleaner so resources are released even if close() is
         // never called (e.g. client disconnect mid-stream).
-        this.cleanable = CLEANER.register(this, new CleaningState(results));
+        this.state = new CleaningState(results);
+        this.cleanable = CLEANER.register(this, this.state);
 
         if (query.paging()) {
             assert query.offset() == 0L;
@@ -129,16 +145,12 @@ public class BinaryEntryIterator<Elem> extends BackendEntryIterator {
             return;
         }
         this.closed = true;
-        // cleanable.clean() is idempotent and releases the Cleaner's reference,
-        // so the cleaning action won't run again on GC.
+        // clean() invokes the cleaning action synchronously on this thread and
+        // is idempotent (so the action won't run again on GC). Mark first: the
+        // action then closes the backend iterator WITHOUT counting a leak,
+        // reserving the leak counter for genuinely abandoned iterators.
+        this.state.markExplicitClose();
         this.cleanable.clean();
-        // Also close directly for immediate effect (results.close() is safe to
-        // call multiple times for most backend implementations).
-        try {
-            this.results.close();
-        } catch (Exception ignored) {
-            // Best-effort
-        }
     }
 
     @Override

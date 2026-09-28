@@ -17,11 +17,13 @@
 
 package org.apache.hugegraph.unit.serializer;
 
+import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.hugegraph.backend.page.PageState;
 import org.apache.hugegraph.backend.query.Query;
@@ -38,8 +40,9 @@ import static org.mockito.Mockito.when;
 
 /**
  * Tests for BinaryEntryIterator resource cleanup behavior,
- * verifying the close chain and the eager close on exhaustion
- * (the Cleaner is a last-resort safety net for abandoned iterators).
+ * verifying the close chain, the eager close on exhaustion and that the
+ * Cleaner leak counter is only fed by genuinely abandoned iterators
+ * (the Cleaner is a last-resort safety net).
  */
 public class BinaryEntryIteratorTest extends BaseUnitTest {
 
@@ -142,6 +145,51 @@ public class BinaryEntryIteratorTest extends BaseUnitTest {
         Assert.assertTrue(
                 "Exhausted BinaryEntryIterator must close the wrapped iterator",
                 tracker.isClosed());
+    }
+
+    @Test
+    public void testExplicitCloseNotCountedAsLeak() throws Exception {
+        AtomicLong counter = cleanedCounter();
+        long before = counter.get();
+
+        TrackingIterator tracker = new TrackingIterator(new byte[]{1});
+        BinaryEntryIterator<byte[]> it = new BinaryEntryIterator<>(
+                tracker, new Query(HugeType.VERTEX), (entry, elem) -> mockEntry());
+        // cleanable.clean() runs the cleaning action synchronously, so an
+        // explicit close() must neither count a leak nor log a warning.
+        it.close();
+
+        Assert.assertTrue(tracker.isClosed());
+        Assert.assertEquals(
+                "Explicit close() must not be counted as a leak",
+                before, counter.get());
+    }
+
+    @Test
+    public void testExhaustionNotCountedAsLeak() throws Exception {
+        AtomicLong counter = cleanedCounter();
+        long before = counter.get();
+
+        TrackingIterator tracker = new TrackingIterator(
+                new byte[]{1}, new byte[]{2});
+        BinaryEntryIterator<byte[]> it = new BinaryEntryIterator<>(
+                tracker, new Query(HugeType.VERTEX), (entry, elem) -> mockEntry());
+        while (it.hasNext()) {
+            it.next();
+        }
+
+        Assert.assertTrue(tracker.isClosed());
+        Assert.assertEquals(
+                "Eager close on exhaustion must not be counted as a leak",
+                before, counter.get());
+    }
+
+    private static AtomicLong cleanedCounter() throws Exception {
+        Class<?> stateClass = Class.forName(
+                BinaryEntryIterator.class.getName() + "$CleaningState");
+        Field field = stateClass.getDeclaredField("CLEANED_COUNT");
+        field.setAccessible(true);
+        return (AtomicLong) field.get(null);
     }
 
     private static BackendEntry mockEntry() {

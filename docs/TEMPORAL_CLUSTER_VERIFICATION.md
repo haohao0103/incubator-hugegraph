@@ -1,6 +1,8 @@
 # Temporal 真实集群验证清单（脚手架 + 签收表）
 
-状态：**待真实集群执行**（本文档只备齐脚手架与清单，**不含、也不得填入伪造结果**）
+状态：**真实集群执行中**（stg-121/122/123，2026-09-28 起；已完成滚动升级、flag 开启、
+功能闭环与异常受控复查、故障恢复演练；性能/回滚演练与签收表待执行——实测记录、发现与
+性能优化见第 10–11 节。本文档只记录真实执行结果，**不含、也不得填入伪造结果**）
 关联：[TEMPORAL_GRAPH_SUPPORT_PLAN.md](TEMPORAL_GRAPH_SUPPORT_PLAN.md) §5.4 / §6.3 / §7.2 ·
 [TEMPORAL_SERIALIZER_COMPATIBILITY_RFC.md](TEMPORAL_SERIALIZER_COMPATIBILITY_RFC.md) §7
 
@@ -197,3 +199,206 @@ CP="target/classes:$(cat target/cp.txt)"   # 含 store-core/common/grpc/client/n
 - **压测驱动脚本**：第 2 节门槛 #2/#3/#4 需要 10,000 次 / 16 并发 / 10 min 稳态的压测驱动。
   现有 Direct 测试是**功能/仲裁**入口，非高并发压测 harness；压测驱动须按目标规模另行搭建
   （可复用 Direct 测试的 PD 路由 + gRPC 提交路径），其产出结果同样只能实测、不可伪造。
+
+## 10. 执行记录：stg 集群实测（2026-09-28，执行中）
+
+> **纪律**：以下均为 stg-121/122/123 真实集群实测记录（含受控复测与代码级根因定位）；
+> 未完成项如实标注"待执行"，不得视为已通过。
+
+### 10.1 环境与部署
+
+| 项 | 值 |
+|---|---|
+| 节点 | stg-121 = 10.129.33.121、stg-122 = 10.129.33.122、stg-123 = 10.129.33.123 |
+| 部署 | 3×Store + 3×Server（PD 沿用现网，无需升降级），部署目录 `/home/data/huge-dis/` |
+| Store 端口 | gRPC 8550 / Raft 8510 / REST 8520；Server REST 8080 |
+| 分支 | `feature/temporal-graph-enhance`（含 master 合并），构建含 temporal 的 Store/Server 部署包 |
+
+证据：本地 `target/*.sh` 执行脚本；远端 `/tmp/stg-*.log` 与会话即时采集输出。
+
+### 10.2 已完成项（真实执行）
+
+1. **滚动升级**：3 Store 逐个升级（flag off，先备份现部署），期间普通图读写不中断；随后 3 Server 逐个升级。
+   脚本：`target/upgrade-hg-store.sh`、`target/upgrade-hg-server-v2.sh`。
+2. **开 flag**：3 Store 设 `-Dhugegraph.temporal.enabled=true` 重启（`target/switch-flag-on.sh`）。
+3. **功能闭环（部分）**：
+   - REST 补充测试 16 子项（append/upsert/close/delete、as_of/between/overlap、重放、分页、回归）：
+     14 项直接通过；2 项（close、重放改 payload）出现 500——经受控复测归因为"发现 1"的受害者
+     （见 10.3），**非** close/replay 语义缺陷。脚本：`target/stg-rest-supplement.sh`。
+   - Store Direct 集成（append → as_of round-trip，经 PD 真实路由到 leader store）。
+4. **异常受控复查（R1-R11 静默复测**，独立 fact key `{"x":"rep1"}` / entity `stg-ts-2`，脚本 `target/stg-close-verify.sh`）：
+   - R1/R2 append 成功（index 1386/1387 committed）；R9 再次 close 成功
+     （index 1389 CLOSE committed views=0）→ **close 语义完好**；
+   - R6 改 payload 重放 → 200（index 1388 ledger-hit no-op）→ **幂等去重生效**；
+   - R10/R11：对不存在区间 close/delete → 原生错误文本
+     `"no interval to close at ..."` / `"no interval to delete at ..."`；
+   - R3/R7/R8：收到 `"TEMPORAL_CONFLICT for fact key"`（append 专属文本）却来自 close/replay 请求，
+     且自身无任何 apply entry——**与其操作不匹配**；
+   - 三对一一对应：R3 500 ↔ 同刻 `stg-flag-off-2@1380 rejected`；R7 500 ↔ `m6@1760 rejected`；
+     R8 500 ↔ `m7@1761 rejected`（3/3 无例外）。
+5. **故障恢复演练（cv-fault，见 10.6）**：污染判别（Server 重启前后对照）、Store 重启 + Raft replay 幂等、
+   leader 切换 + 写入中断重试幂等，全部实测通过。
+
+### 10.3 发现 1：pendingTemporalWrites 残留引发跨请求"幽灵重放 + 响应错配"（Server 层缺陷，根因已定位）
+
+**现象**：某 temporal 写请求失败（如区间冲突）后，**同一 HTTP worker 线程**上后续的 temporal 请求会：
+(a) 收到**上一个失败请求**的错误消息（响应错配，误导排障）；(b) 自身 bundle 从未提交（无 apply entry）；
+(c) 同时刻日志出现更早的失败请求以**新 raft index** 被再次 propose 并再次被拒（幽灵重放，日志噪声）。
+
+**判别证据**：R10/R11 证明 close/delete 原生文本与 `"for fact key"` 不同 → R3/R7/R8 的 500
+不可能源于自身操作；R9/R6 证明语义本身完好。历史幽灵（stg-func-1/2/3、flag-off-1/2、mutation-a/b、
+m4、m6、m7）与测试请求的"同时刻"对应同源。
+
+**根因（代码级，已逐环节核实）**：
+1. `GraphTransaction.pendingTemporalWrites`（实例字段）：`flushTemporalOnly()` /
+   `flushPendingTemporalWrites()` 循环 dispatch 时任一请求被 Store 拒绝（如 `TEMPORAL_CONFLICT`）
+   → 异常中断 → **`clear()` 不执行 → 请求残留**；
+2. `GraphTransaction` 实例被 `StandardHugeGraph.TinkerPopTransaction` 的 `ThreadLocal<Txs>`
+   **按线程长期复用**（`setClosed()` 仅置标志位、`getOrNewTransaction()` 注释明确 "for reusing backend tx"；
+   `destroyTransaction()` 仅在 graph/进程关闭时调用）；
+3. 后续请求（同线程）flush 时**先重提残留请求** → 残留再次被拒 → 异常直接冒泡给当前请求
+   （消息=残留请求的错误），当前请求 bundle 从未 dispatch；
+4. `GraphTransaction.rollback()` 与 `API.commit()` 的异常回滚路径**均不清理** `pendingTemporalWrites`
+   → 污染在进程存活期内**无限持续**（残留链中只要有"确定性冲突"请求，该线程永久污染；
+   无确定性冲突的残留链可在某次 flush 全部成功后自愈，解释了多数历史幽灵后来消失）。
+
+**影响**：被污染线程上的 temporal 请求持续失败且报出错误的原因；写请求静默丢弃（客户端 500 已感知）；
+无数据损坏（幽灵重提是合法新 propose，被正确拒绝）。**范围**：Server 端事务层，与 Store/Raft 无关。
+
+**复现**：确定性复现——制造一个确定性冲突请求 A 使其失败，随后从同一 worker 发正常请求 B
+→ B 也 500 且原因为 A 的；**预测已端到端确证**：重启 Server 后污染消失（见 10.6-A：
+重启前 30 探测 11 失败 → 重启后同一探测 30/30 成功且幽灵计数冻结）。
+
+**修复方向（待评审）**：flush 循环逐请求隔离（失败即记录并移除，不中断其余），以及 rollback/close 时
+清空 `pendingTemporalWrites`；原则：temporal 失败是请求级结果，不得污染 tx 的后续复用。
+
+### 10.4 发现 2：重放指纹比对未实现（实现落后于设计文档）
+
+- 设计（§5.3 冻结契约，`TEMPORAL_GRAPH_SUPPORT_PLAN.md`）：同一 `mutation_id` 重放时
+  canonical fact key / schema_version / valid interval / payload hash **任一不同必须 `IDEMPOTENCY_CONFLICT`**。
+- 实测：R6 改 payload 重放 → **200 no-op**（Store 端 ledger 命中即 no-op，无指纹比较；
+  代码 `TemporalMutationHandler.apply` 的 ledger 检查先于 contributeOp 执行）。
+- 影响：无法识别"同 mutation_id 不同内容"的客户端事故（幂等保护弱于设计）；无数据损坏（首次提交语义生效）。
+- 处置：登记为待修复项（Store 端 ledger 记录指纹并在重放时比对）。
+
+### 10.5 待执行
+
+- ~~故障恢复（第 4 节）~~：已完成核心四项（见 10.6）；**snapshot/restore round-trip 与分片迁移未做**，登记待补；
+- 性能门槛七项（第 2 节）：需先搭建压测驱动（§9 已登记缺口）；
+- 回滚演练（第 6 节）；
+- 第 8 节签收表：待上述完成后填入实测值。
+
+### 10.6 故障恢复演练实测（cv-fault，2026-09-28 下午）
+
+**A. 污染判别验证（对应 10.3 预测；脚本 `target/stg-fault-probe.sh`）**
+
+- 重启前：30 个 no-op 重放探测 → **19 OK + 11 个 500**；幽灵以**新 raft index** 重现
+  （flag-off-2@1382/1384、m6@1762/1764、m7@1763），计数 6/4/4 → **10/8/6**。
+- 重启 121 Server（进程 13:38:47 → 14:38 换新 pid 27261）后同一探测：**30 OK + 0 BAD**，
+  幽灵计数**冻结于 10/8/6**（无任何新 rejected）。
+- **结论：10.3 根因（线程级 tx 残留）端到端确证**；R3/R7/R8 相同参数在干净进程下全部 200。
+
+**B. Store 重启 + Raft replay 幂等（stg-123）**
+
+- 停服：优雅停 30s 超时→强杀（已知 ContextClosedListener 等待缺陷，升级脚本含回退处理）；
+  启动新 pid 26554。
+- 启动 replay 新日志 1009 行：temporal apply entry **69 次**，其中 **ledger-hit no-op 53 次**
+  （重放幂等的直接证据）；10 次历史冲突决策重放（rejected 条目的决策重放，无副作用）。
+- 数据一致性：重启前后 between/as_of 查询**逐字节一致**；no-op 重放 200；123 恢复服务。
+
+**C. Leader 切换 + 写入中断重试（Raft 4 = 事实键 `{"x":"lf1"}`，leader=121 store）**
+
+- 基线写 `lf-1` → 200；`kill -9` store-121（14:49:22）。
+- 中断窗口写 `lf-2` → **500 `UNAVAILABLE: io exception`**（客户端仍指向死节点）。
+- **3 秒完成选举**：14:49:25 122 `Raft 4 becomes leader`（term 5→6），123 转向 following 122:8510。
+- 同 mutation_id 重试 → **4 秒时第 1 次重试即 200**。
+- 121 重启（pid 28777）后作为 follower 重新加入（14:49:34 following leaderId=122:8510 term=6）。
+- **最终对账（between 全量）**：`lf-1`/`lf-2`/`lf-3` 三条区间无缝连续（rev 1446/1448/1449），
+  **零重复、零丢失**；恢复后新写 `lf-3` → 200。
+
+**工具链备注（非产品缺陷）**：121 Server 绑定节点 IP（10.129.33.121），本机 `127.0.0.1` 探测会被拒，
+验证脚本应以节点 IP 探测；Store 优雅停 30s 超时需强杀回退（上文缺陷）。
+
+## 11. 性能审计与优化（2026-09-28，代码级；待部署 + cv-perf 实测）
+
+> **纪律**：本节记录代码级审计结论、优化实现与离线验证状态；所有端到端性能变化**只能**由
+> 重新部署后的第 2 节七项门槛实测（cv-perf）确认，本节不含推测数值、不宣称达标。
+> **部署状态**：本节全部改动（S1–S12 与 §11.4 修复）为本地实现，**尚未部署到 stg**，现网仍是
+> 优化前构建；重部署须走第 5 节滚动升级纪律。
+
+### 11.1 审计范围与方法
+
+对 temporal 全链路 20+ 文件逐调用点做成本分解（每次写/读路径的 JCA 调用、堆分配、seek 次数、
+锁竞争面）：Server 侧 `TieBreakers` / `TemporalRowKeyCodec` / `TemporalFactKey` /
+`TemporalMutationPlanner` / `HstoreStore`；Store 侧 `TemporalIntervalCodec` /
+`TemporalMutationHandler` / `TemporalQueryHandler` / `TemporalMutationBundleCodec`。
+所有优化以**不改变任何线上字节布局**为前提（bundle codec v3 / marker layout v1 / row-key 编码与
+tie-breaker 字节全部不变，由 `TemporalSerializerCompatibilityTest` 与既有字节断言守门）。
+
+### 11.2 修复清单（S1–S12，已实现；离线回归全绿）
+
+| # | 位置 | 原成本 | 优化 |
+|---|---|---|---|
+| S1 | Server `TieBreakers.sha256` | 每次调用 `MessageDigest.getInstance("SHA-256")`（每写多触发：tie_breaker + fact-key hash + colocation hash） | `ThreadLocal<MessageDigest>` 池化 |
+| S2 | Server `TemporalMutationPlanner.plan` | 每 view 重取 canonical 字节 + 重算 history row key 前缀 | fact key 读一次 + 行键复用已算 group prefix |
+| S3 | Server `TieBreakers.concat` | `ByteArrayOutputStream` 多轮扩容复制 | 两遍法预分配（字节输出不变：4B 大端长度 + payload） |
+| S4 | Server `TemporalFactKey` | 包内热路径经 `canonicalBytes()` 反复防御性拷贝 | 包内 `canonicalBytesView()` 无拷贝视图（外部契约不变） |
+| S5 | Server `HstoreStore` | 每请求 `new TemporalRowKeyCodec()` | `static final` 单例（无状态不可变） |
+| S6 | Store `TemporalMutationHandler.apply` | 热路径内含 `getSession(groupId)` instrumentation 块 + 逐行 debug `toHex` | 移除热路径 instrumentation 与逐行日志 |
+| S7 | Store 写锁 | `ConcurrentMap` 无界 per-fact intern 锁（长生命周期 Store 上的慢泄漏 + 全局 map 竞争） | 1024 条定长条带锁（同 fact 恒定同条带，互斥性不变） |
+| S8 | Store `hasConflict` | 1 次 fact 前缀全扫描：逐行 parse 全部历史（含每行 debug） | 三段剪枝 + 首行探测快路径 + legacy 兜底（见下表） |
+| S9 | Store `findInterval` | 1 次 fact 前缀全扫描定位单区间 | 两次单桶精确 seek：先 `OPEN_BUCKET`（保持原 key 序）再 `bucketOf(validFrom)` 桶 |
+| S10 | Store `TemporalMutationBundleCodec.decode` | Raft 载荷整体拷贝切片后再解码 | `(byte[], offset, length)` 原地解码重载 |
+| S11 | Store `TemporalIntervalCodec` | `intervalKey`/`bucketPrefix` 经 BAOS 扩容 | 预分配数组直写（字节不变） |
+| S12 | Store `TemporalQueryHandler.scanBucket` | debug 参数字符串（含 factKey UTF-8 解码）无条件拼接 | `isDebugEnabled()` 门后构造 |
+
+**S8 成本对照（append 冲突检查的 seek/行解析量）**：
+
+| 场景 | 旧 | 新 |
+|---|---|---|
+| 全新 fact（无历史行） | 1 seek + 0 行 | 3 个单桶 seek |
+| 补录（所有行 ≥ 候选桶） | 1 seek + N 行 parse | 3 个单桶 seek + 0 行 parse |
+| 历史 fact（早桶命中，跨桶距 D ≤ 512） | 1 seek + N 行 parse | 3 + D 个单桶 seek，命中即决断 |
+| 极老数据（早桶距 > 512，≈10 年+） | 1 seek + N 行 parse | legacy 全前缀兜底（正确性优先，罕见） |
+
+正确性论证（已落盘代码注释）：早桶 ACTIVE 行在非重叠不变式下 `a.to ≤ newFrom`，任意更早行
+`b.to ≤ a.from < newFrom` → 不跨越候选区间即可安全早停；低桶 PAST 行在桶前提下不可能出现
+（防御性 legacy 回退）；范围扫描右界以 `bucketOf(candidateTo-1)+1` 精确保界；覆盖判定恒用完整公式
+`newFrom < existingTo && from < candidateTo`（不化简，零长度边界行为与旧实现一致）。
+
+### 11.3 离线验证（完成）
+
+- Store 侧 `TemporalSuiteTest`：**51/51 全绿**（含 `TemporalSerializerCompatibilityTest`，字节兼容不回退）；
+- Server 侧 9 个 temporal 测试类：**48/48 全绿**（tie-breaker base32 值、row-key 宽度 94B 等既有字节断言均未变）；
+- 两侧全量编译通过；mock 测试同步补齐了新 scan 调用面的 stub（语义与真实 Store 的 `[start, end)` 扫描一致）。
+
+### 11.4 附带发现：`BinaryEntryIterator` “泄漏 WARN”为计数误报（根因已定位并修复）
+
+**现象**：滚动升级完成起（stg-121 于 13:38:59），三台 Server 持续输出
+`BinaryEntryIterator cleaned without explicit close (... occurrences total)`，当日下午每台累计约
+1200 条 WARN（全局计数器约 12 万次）。该日志来自 master 合并带入的 Cleaner 安全网（上游提交
+`ea06593ab`/`fc5fec6c0`）。
+
+**判别证据**：对 stg-121 全量 WARN 按线程名归类——约 1200 条中 1191 条来自 `task-db-worker-1`，
+其余来自 `grizzly-http-server-*`，**0 条来自 Cleaner 线程**，且计数随查询/任务吞吐匀速增长
+→ 全部“泄漏”都发生在业务线程的同步路径上，不存在任何 GC 触发的真实泄漏。
+
+**根因（代码级）**：`Cleaner.Cleanable.clean()` 的规范语义是**在调用线程同步运行** cleaning
+action；`doClose()` 调用 `cleanable.clean()` 因此同步执行了 `CleaningState.run()`，而 run() 无条件
+`CLEANED_COUNT.incrementAndGet()`——**每次正常显式 close 都被计成一次“泄漏”**。设计意图
+（代码注释 “eager close() paths should make this fire only for genuinely abandoned iterators”）与实现不符。
+
+**修复**：`CleaningState` 增加 `explicitlyClosed` 标志；`doClose()` 先 `markExplicitClose()` 再
+`clean()`——run() 仅在 **GC 触发**时计数 + WARN；显式 close 只关资源、不计数。新增 2 项回归测试
+（显式 close / 耗尽 eager close 不计数），`BinaryEntryIteratorTest` **5/5 全绿**。
+
+**影响与处置**：底层迭代器实际**始终被正确关闭**（显式路径经 clean() 同步关闭，弃用路径经 GC 兜底），
+本缺陷纯属计数与日志污染（WARN 洪泛 + 每秒级日志 I/O）。现网 stg 为修复前构建，洪泛在重部署前持续；
+重部署后若再出现该 WARN，**先看线程名：`Cleaner-*` 才代表真实泄漏路径**。
+
+### 11.5 待办（与第 2/8 节联动）
+
+- 重新构建含本节全部改动的 Store/Server 包并部署（下次窗口，走第 5 节滚动升级纪律）；
+- 部署后执行 cv-perf：七项性能门槛实测并回填第 8 节签收表（**唯一**的性能达标依据）；
+- 部署后观察 24h：`BinaryEntryIterator` WARN 应归零（或仅剩 `Cleaner-*` 线程条目）。
+
