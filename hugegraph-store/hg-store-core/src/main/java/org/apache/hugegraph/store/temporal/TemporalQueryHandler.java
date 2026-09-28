@@ -105,8 +105,20 @@ public final class TemporalQueryHandler {
      * guarantee there is at most one such interval per fact key.
      */
     public List<TemporalIntervalRow> asOf(String graph, byte[] factKey, long time) {
+        return asOf(graph, factKey, time, null);
+    }
+
+    /**
+     * Variant of {@link #asOf(String, byte[], long)} that records how many rows
+     * were scanned and how many buckets were walked into {@code stats} (may be
+     * null). This is the measurement hook for the frozen performance gate
+     * "temporal scanned rows <= 10x returned rows" (design doc §5.4): without it
+     * the amplification of an index-hit query is unobservable.
+     */
+    public List<TemporalIntervalRow> asOf(String graph, byte[] factKey, long time,
+                                          ScanStats stats) {
         int code = PartitionUtils.calcHashcode(factKey);
-        ScanBudget budget = new ScanBudget();
+        ScanBudget budget = new ScanBudget(stats);
         // 1. Open markers live in their own sentinel bucket and are unbounded,
         //    so an open interval containing `time` is found in one seek.
         for (TemporalIntervalRow row : scanBucket(graph, factKey, code,
@@ -149,7 +161,13 @@ public final class TemporalQueryHandler {
      */
     public List<TemporalIntervalRow> between(String graph, byte[] factKey,
                                              long from, long to) {
-        return range(graph, factKey, from, to);
+        return range(graph, factKey, from, to, null);
+    }
+
+    /** {@link #between} variant that records scan amplification into {@code stats}. */
+    public List<TemporalIntervalRow> between(String graph, byte[] factKey,
+                                             long from, long to, ScanStats stats) {
+        return range(graph, factKey, from, to, stats);
     }
 
     /**
@@ -158,16 +176,22 @@ public final class TemporalQueryHandler {
      */
     public List<TemporalIntervalRow> overlap(String graph, byte[] factKey,
                                              long from, long to) {
-        return range(graph, factKey, from, to);
+        return range(graph, factKey, from, to, null);
+    }
+
+    /** {@link #overlap} variant that records scan amplification into {@code stats}. */
+    public List<TemporalIntervalRow> overlap(String graph, byte[] factKey,
+                                             long from, long to, ScanStats stats) {
+        return range(graph, factKey, from, to, stats);
     }
 
     private List<TemporalIntervalRow> range(String graph, byte[] factKey,
-                                            long from, long to) {
+                                            long from, long to, ScanStats stats) {
         if (from >= to) {
             return Collections.emptyList();
         }
         int code = PartitionUtils.calcHashcode(factKey);
-        ScanBudget budget = new ScanBudget();
+        ScanBudget budget = new ScanBudget(stats);
         List<TemporalIntervalRow> result = new ArrayList<>();
         // 1. Open markers: [a, open) intersects [from, to) iff a < to.
         for (TemporalIntervalRow row : scanBucket(graph, factKey, code,
@@ -217,6 +241,7 @@ public final class TemporalQueryHandler {
                                                  long bucket, ScanBudget budget) {
         byte[] prefix = TemporalIntervalCodec.bucketPrefix(factKey, bucket);
         List<TemporalIntervalRow> rows = new ArrayList<>();
+        budget.recordBucket();
         try (ScanIterator iterator = this.businessHandler.scanPrefix(
                 graph, code, HugeServerTables.TEMPORAL_HISTORY_TABLE, prefix)) {
             while (iterator.hasNext()) {
@@ -248,12 +273,62 @@ public final class TemporalQueryHandler {
     /** Row budget shared across all buckets of one query. */
     private final class ScanBudget {
 
+        private final ScanStats stats;
         private long rows;
+
+        ScanBudget(ScanStats stats) {
+            this.stats = stats;
+        }
 
         void checkRow() {
             if (++this.rows > TemporalQueryHandler.this.maxScanRows) {
                 throw limitExceeded();
             }
+            if (this.stats != null) {
+                this.stats.scannedRows = this.rows;
+            }
+        }
+
+        void recordBucket() {
+            if (this.stats != null) {
+                this.stats.bucketsWalked++;
+            }
+        }
+    }
+
+    /**
+     * Mutable collector for one query's scan amplification: how many physical
+     * rows were read and how many buckets were seeked to produce the returned
+     * intervals. Passed by the caller (typically the Store gRPC read handler) so
+     * the scanned-vs-returned ratio can be logged and asserted against the
+     * frozen §5.4 gate. Not thread-safe; use one instance per query.
+     */
+    public static final class ScanStats {
+
+        private long scannedRows;
+        private long bucketsWalked;
+
+        /** Physical rows read across all buckets of the query. */
+        public long scannedRows() {
+            return this.scannedRows;
+        }
+
+        /** Number of bucket prefixes seeked (open sentinel included). */
+        public long bucketsWalked() {
+            return this.bucketsWalked;
+        }
+
+        /**
+         * Scan amplification relative to {@code returnedRows}: the number of
+         * physical rows read per returned interval. The frozen gate caps this at
+         * 10x for index-hit queries; a returned count of 0 reports the raw
+         * scanned rows to avoid a divide-by-zero.
+         */
+        public double amplification(int returnedRows) {
+            if (returnedRows <= 0) {
+                return this.scannedRows;
+            }
+            return (double) this.scannedRows / returnedRows;
         }
     }
 

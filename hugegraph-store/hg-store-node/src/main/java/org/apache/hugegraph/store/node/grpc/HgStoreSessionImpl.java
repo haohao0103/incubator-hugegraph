@@ -80,6 +80,14 @@ public class HgStoreSessionImpl extends HgStoreSessionGrpc.HgStoreSessionImplBas
     private PdProvider pdProvider;
     private TemporalQueryHandler temporalQueryHandler;
 
+    /**
+     * Scan-amplification warn threshold for fact-scoped temporal reads, mirroring
+     * the frozen performance gate "temporal scanned rows <= 10x returned rows"
+     * (design doc §5.4). Exceeding it logs a warning; it does not fail the query,
+     * since absolute scan size is already hard-capped in the query handler.
+     */
+    private static final double TEMPORAL_SCAN_AMPLIFICATION_WARN = 10.0D;
+
     private HgStoreWrapperEx getWrapper() {
         if (this.wrapper == null) {
             synchronized (this) {
@@ -167,21 +175,42 @@ public class HgStoreSessionImpl extends HgStoreSessionGrpc.HgStoreSessionImplBas
         String graph = request.getHeader().getGraph();
         byte[] factKey = request.getFactKey().toByteArray();
         TemporalQueryHandler handler = getTemporalQueryHandler();
+        TemporalQueryHandler.ScanStats stats = new TemporalQueryHandler.ScanStats();
 
         List<TemporalIntervalRow> rows;
         switch (request.getType()) {
             case TEMPORAL_QUERY_AS_OF:
-                rows = handler.asOf(graph, factKey, request.getFrom());
+                rows = handler.asOf(graph, factKey, request.getFrom(), stats);
                 break;
             case TEMPORAL_QUERY_BETWEEN:
-                rows = handler.between(graph, factKey, request.getFrom(), request.getTo());
+                rows = handler.between(graph, factKey, request.getFrom(), request.getTo(), stats);
                 break;
             case TEMPORAL_QUERY_OVERLAP:
-                rows = handler.overlap(graph, factKey, request.getFrom(), request.getTo());
+                rows = handler.overlap(graph, factKey, request.getFrom(), request.getTo(), stats);
                 break;
             default:
                 rows = java.util.Collections.emptyList();
                 break;
+        }
+
+        // Scan-amplification observability for the frozen gate "scanned rows <=
+        // 10x returned rows" (design doc §5.4). A breach is not fatal here (the
+        // handler already hard-caps absolute scans via TEMPORAL_QUERY_LIMIT_
+        // EXCEEDED); it is surfaced as a warn so the amplification of an
+        // index-hit query is measurable instead of silent.
+        double amplification = stats.amplification(rows.size());
+        if (amplification > TEMPORAL_SCAN_AMPLIFICATION_WARN) {
+            log.warn("temporal query scan amplification {}x exceeds {}x: graph={} " +
+                     "type={} scannedRows={} bucketsWalked={} returnedRows={}",
+                     String.format("%.2f", amplification),
+                     TEMPORAL_SCAN_AMPLIFICATION_WARN, graph, request.getType(),
+                     stats.scannedRows(), stats.bucketsWalked(), rows.size());
+        } else if (log.isDebugEnabled()) {
+            log.debug("temporal query scan stats: graph={} type={} scannedRows={} " +
+                      "bucketsWalked={} returnedRows={} amplification={}x",
+                      graph, request.getType(), stats.scannedRows(),
+                      stats.bucketsWalked(), rows.size(),
+                      String.format("%.2f", amplification));
         }
 
         TemporalQueryRes.Builder builder = TemporalQueryRes.newBuilder()

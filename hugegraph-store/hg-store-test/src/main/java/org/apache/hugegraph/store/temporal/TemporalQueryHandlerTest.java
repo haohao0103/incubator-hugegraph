@@ -176,6 +176,63 @@ public class TemporalQueryHandlerTest {
     }
 
     @Test
+    public void shouldRecordScanStatsForAsOf() {
+        BusinessHandler business = mock(BusinessHandler.class);
+        byte[] factKey = bytes("fact");
+        when(business.scanPrefix(anyString(), anyInt(), anyString(), any()))
+                .thenAnswer(scanAnswer(marker(factKey, 100L, 200L, 41L)));
+
+        TemporalQueryHandler query = new TemporalQueryHandler(business);
+        TemporalQueryHandler.ScanStats stats = new TemporalQueryHandler.ScanStats();
+        List<TemporalIntervalRow> rows = query.asOf("g", factKey, 150L, stats);
+
+        assertEquals(1, rows.size());
+        // The open sentinel bucket is seeked first and yields the containing
+        // marker, so exactly one bucket is walked and one row is scanned; the
+        // amplification of this index-hit query is therefore 1.0 (<= 10x gate).
+        assertTrue(stats.bucketsWalked() >= 1L);
+        assertEquals(1L, stats.scannedRows());
+        assertEquals(1.0D, stats.amplification(rows.size()), 0.0001D);
+    }
+
+    @Test
+    public void shouldRecordScanStatsForBetween() {
+        BusinessHandler business = mock(BusinessHandler.class);
+        byte[] factKey = bytes("fact");
+        when(business.scanPrefix(anyString(), anyInt(), anyString(), any()))
+                .thenAnswer(scanAnswer(marker(factKey, 100L, 200L, 1L),
+                                       marker(factKey, 300L, 400L, 2L)));
+
+        TemporalQueryHandler query = new TemporalQueryHandler(business);
+        TemporalQueryHandler.ScanStats stats = new TemporalQueryHandler.ScanStats();
+        List<TemporalIntervalRow> rows = query.between("g", factKey, 0L, 600L, stats);
+
+        // Stats must be populated and never under-count the returned intervals:
+        // scanned rows are the physical reads that produced the result.
+        assertTrue(stats.bucketsWalked() >= 1L);
+        assertTrue(stats.scannedRows() >= rows.size());
+    }
+
+    @Test
+    public void shouldReportRawScannedRowsWhenNothingReturned() {
+        BusinessHandler business = mock(BusinessHandler.class);
+        byte[] factKey = bytes("fact");
+        // Empty scan: no markers at all, so nothing is returned and the
+        // amplification helper must fall back to the raw scanned-row count
+        // instead of dividing by zero.
+        when(business.scanPrefix(anyString(), anyInt(), anyString(), any()))
+                .thenAnswer(scanAnswer());
+
+        TemporalQueryHandler query = new TemporalQueryHandler(business);
+        TemporalQueryHandler.ScanStats stats = new TemporalQueryHandler.ScanStats();
+        List<TemporalIntervalRow> rows = query.asOf("g", factKey, 150L, stats);
+
+        assertTrue(rows.isEmpty());
+        assertEquals(0L, stats.scannedRows());
+        assertEquals(0.0D, stats.amplification(rows.size()), 0.0001D);
+    }
+
+    @Test
     public void shouldOrderResultsByValidFrom() {
         BusinessHandler business = mock(BusinessHandler.class);
         byte[] factKey = bytes("fact");

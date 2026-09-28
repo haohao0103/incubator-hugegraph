@@ -252,6 +252,18 @@
                         </configuration>
                     </execution>
                     <execution>
+                        <id>store-temporal-test</id>
+                        <configuration>
+                            <testSourceDirectory>${basedir}/src/main/java/
+                            </testSourceDirectory>
+                            <testClassesDirectory>${basedir}/target/classes/
+                            </testClassesDirectory>
+                            <includes>
+                                <include>**/TemporalSuiteTest.java</include>
+                            </includes>
+                        </configuration>
+                    </execution>
+                    <execution>
                         <id>store-rocksdb-test</id>
                         <configuration>
                             <testSourceDirectory>${basedir}/src/main/java/

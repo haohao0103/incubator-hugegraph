@@ -48,6 +48,11 @@ import org.apache.hugegraph.unit.core.SecurityManagerTest;
 import org.apache.hugegraph.unit.core.SerialEnumTest;
 import org.apache.hugegraph.unit.core.ServerInfoManagerTest;
 import org.apache.hugegraph.unit.core.SystemSchemaStoreTest;
+import org.apache.hugegraph.unit.core.TemporalIntervalTest;
+import org.apache.hugegraph.unit.core.TemporalModelTest;
+import org.apache.hugegraph.unit.core.TemporalQueryTest;
+import org.apache.hugegraph.unit.core.TemporalSchemaTest;
+import org.apache.hugegraph.unit.core.TemporalSerializerTest;
 import org.apache.hugegraph.unit.core.TraversalUtilTest;
 import org.apache.hugegraph.unit.id.EdgeIdTest;
 import org.apache.hugegraph.unit.id.IdTest;
@@ -68,6 +73,10 @@ import org.apache.hugegraph.unit.serializer.TableBackendEntryTest;
 import org.apache.hugegraph.unit.serializer.TextBackendEntryTest;
 import org.apache.hugegraph.unit.serializer.TextSerializerTest;
 import org.apache.hugegraph.unit.store.RamIntObjectMapTest;
+import org.apache.hugegraph.unit.temporal.TemporalBackendStoreSkeletonTest;
+import org.apache.hugegraph.unit.temporal.TemporalBackendStoreTest;
+import org.apache.hugegraph.unit.temporal.TemporalMutationBundleFactoryTest;
+import org.apache.hugegraph.unit.temporal.TemporalMutationPlannerTest;
 import org.apache.hugegraph.unit.util.CompressUtilTest;
 import org.apache.hugegraph.unit.util.JsonUtilTest;
 import org.apache.hugegraph.unit.util.RateLimiterTest;
@@ -173,7 +182,18 @@ import org.junit.runners.Suite;
         IntSetTest.class,
 
         /* store */
-        RamIntObjectMapTest.class
+        RamIntObjectMapTest.class,
+
+        /* temporal (Valid Time interval model; pure unit, no cluster) */
+        TemporalModelTest.class,
+        TemporalSchemaTest.class,
+        TemporalIntervalTest.class,
+        TemporalQueryTest.class,
+        TemporalSerializerTest.class,
+        TemporalBackendStoreSkeletonTest.class,
+        TemporalBackendStoreTest.class,
+        TemporalMutationPlannerTest.class,
+        TemporalMutationBundleFactoryTest.class
 })
 public class UnitTestSuite {
 
