@@ -74,6 +74,13 @@ public interface BusinessHandler extends DBSessionBuilder {
     ScanIterator scan(String graph, int code, String table, byte[] start,
                       byte[] end, int scanType) throws HgStoreException;
 
+    default ScanIterator scanOrdered(String graph, String table, byte[] start,
+                                     byte[] end, int scanType)
+                                     throws HgStoreException {
+        throw new UnsupportedOperationException(
+                "Ordered scan is not supported");
+    }
+
     /**
      * primary index scan
      */
@@ -157,14 +164,19 @@ public interface BusinessHandler extends DBSessionBuilder {
 
     default void doBatch(String graph, int partId, List<BatchEntry> entryList) {
         BusinessHandler.TxBuilder builder = txBuilder(graph, partId);
+        BusinessHandler.Tx transaction = builder.build();
         try {
             applyBatchEntries(builder, entryList);
-            builder.build().commit();
+            transaction.commit();
         } catch (Throwable e) {
             String msg =
                     String.format("graph data %s-%s do batch insert with error:", graph, partId);
             log.error(msg, e);
-            builder.build().rollback();
+            try {
+                transaction.rollback();
+            } catch (Throwable rollbackError) {
+                e.addSuppressed(rollbackError);
+            }
             throw e;
         }
     }
@@ -186,6 +198,7 @@ public interface BusinessHandler extends DBSessionBuilder {
                          List<TemporalBundle> temporalBundles, long applyIndex,
                          TemporalMutationHandler temporalHandler) {
         BusinessHandler.TxBuilder builder = txBuilder(graph, partId);
+        BusinessHandler.Tx transaction = builder.build();
         try {
             applyBatchEntries(builder, entryList);
             if (temporalBundles != null) {
@@ -202,12 +215,16 @@ public interface BusinessHandler extends DBSessionBuilder {
                     temporalHandler.contribute(partId, bundle, builder, applyIndex);
                 }
             }
-            builder.build().commit();
+            transaction.commit();
         } catch (Throwable e) {
             String msg = String.format(
                     "graph data %s-%s do batch insert with temporal error:", graph, partId);
             log.error(msg, e);
-            builder.build().rollback();
+            try {
+                transaction.rollback();
+            } catch (Throwable rollbackError) {
+                e.addSuppressed(rollbackError);
+            }
             throw e;
         }
     }
@@ -272,6 +289,22 @@ public interface BusinessHandler extends DBSessionBuilder {
 
     void unlock(String path);
 
+    /**
+     * Non-blocking attempt to reserve the compactRange() window for partition {@code id}.
+     * Returns false if a compaction is actively running for that partition right now.
+     * Default throws, like {@link #scanOrdered}, so adding this compaction-lock helper does
+     * not break downstream implementations of this public interface that predate it.
+     */
+    default boolean tryLockCompactionRange(int id) {
+        throw new UnsupportedOperationException(
+                "Compaction-range locking is not supported");
+    }
+
+    default void unlockCompactionRange(int id) {
+        throw new UnsupportedOperationException(
+                "Compaction-range locking is not supported");
+    }
+
     void awaitAndSetLock(int id, int expectedValue, int value) throws InterruptedException,
                                                                       TimeoutException;
 
@@ -280,6 +313,18 @@ public interface BusinessHandler extends DBSessionBuilder {
     AtomicInteger getState(int id);
 
     String getLockPath(int partitionId);
+
+    /**
+     * The path lock state for {@code path} as set by {@link #lock} / {@link #unlock}
+     * ({@link #compactionCanStart} or {@link #doing}), or {@code null} if {@code path} has
+     * never been locked. Default throws, like {@link #scanOrdered}, so adding this
+     * compaction-lock helper does not break downstream implementations of this public
+     * interface that predate it.
+     */
+    default AtomicInteger getPathLockState(String path) {
+        throw new UnsupportedOperationException(
+                "Compaction-range locking is not supported");
+    }
 
     List<Integer> getPartitionIds(String graph);
 

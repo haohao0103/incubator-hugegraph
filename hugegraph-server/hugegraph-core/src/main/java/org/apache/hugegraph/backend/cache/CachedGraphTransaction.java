@@ -32,9 +32,12 @@ import org.apache.hugegraph.backend.cache.CachedBackendStore.QueryId;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.backend.query.IdQuery;
 import org.apache.hugegraph.backend.query.Query;
+import org.apache.hugegraph.backend.query.QueryBatch;
+import org.apache.hugegraph.backend.query.QueryResultContext;
 import org.apache.hugegraph.backend.query.QueryResults;
 import org.apache.hugegraph.backend.store.BackendMutation;
 import org.apache.hugegraph.backend.store.BackendStore;
+import org.apache.hugegraph.backend.store.BackendStoreProvider;
 import org.apache.hugegraph.backend.store.ram.RamTable;
 import org.apache.hugegraph.backend.tx.GraphTransaction;
 import org.apache.hugegraph.config.CoreOptions;
@@ -70,12 +73,22 @@ public final class CachedGraphTransaction extends GraphTransaction {
     private static final ConcurrentMap<String, CacheListenerHolder>
             GRAPH_CACHE_EVENT_LISTENERS = new ConcurrentHashMap<>();
 
+    /*
+     * Same ref-counted lifecycle for the store event listener registered
+     * on the BackendStoreProvider; see StoreListenerHolder.
+     *
+     * Replaces the removed protected static storeEventListenStatus field
+     * that previously tracked store-listen state on GraphTransaction.
+     */
+    private static final ConcurrentMap<String, StoreListenerHolder>
+            STORE_EVENT_LISTENERS = new ConcurrentHashMap<>();
+
     private final Cache<Id, Object> verticesCache;
     private final Cache<Id, Object> edgesCache;
 
-    private EventListener storeEventListener;
     private EventListener cacheEventListener;
     private CacheListenerHolder holder;
+    private StoreListenerHolder storeHolder;
 
     public CachedGraphTransaction(HugeGraphParams graph, BackendStore store) {
         super(graph, store);
@@ -135,7 +148,7 @@ public final class CachedGraphTransaction extends GraphTransaction {
         Set<String> storeEvents = ImmutableSet.of(Events.STORE_INIT,
                                                   Events.STORE_CLEAR,
                                                   Events.STORE_TRUNCATE);
-        this.storeEventListener = event -> {
+        EventListener storeListener = event -> {
             if (storeEvents.contains(event.name())) {
                 LOG.debug("Graph {} clear graph cache on event '{}'",
                           this.graph(), event.name());
@@ -144,9 +157,24 @@ public final class CachedGraphTransaction extends GraphTransaction {
             }
             return false;
         };
-        if (storeEventListenStatus.putIfAbsent(this.params().spaceGraphName(), true) == null) {
-            this.store().provider().listen(this.storeEventListener);
-        }
+        BackendStoreProvider provider = this.store().provider();
+        String graphName = this.params().spaceGraphName();
+        StoreListenerHolder storeAcquired = STORE_EVENT_LISTENERS.compute(
+                graphName, (key, existing) -> {
+                    if (existing == null || existing.provider != provider) {
+                        // Graph close/reopen creates a new provider for the
+                        // same graph name; replace the stale holder. Old
+                        // transactions skip decrement via identity check.
+                        if (existing != null) {
+                            existing.provider.unlisten(existing.listener);
+                        }
+                        provider.listen(storeListener);
+                        return new StoreListenerHolder(storeListener, provider);
+                    }
+                    existing.refCount++;
+                    return existing;
+                });
+        this.storeHolder = storeAcquired;
 
         // Listen cache event: "cache"(invalid cache item)
         EventListener listener = event -> {
@@ -196,7 +224,6 @@ public final class CachedGraphTransaction extends GraphTransaction {
             return false;
         };
         EventHub graphEventHub = this.params().graphEventHub();
-        String graphName = this.params().spaceGraphName();
         CacheListenerHolder acquired = GRAPH_CACHE_EVENT_LISTENERS.compute(
                 graphName, (key, existing) -> {
                     if (existing == null || existing.hub != graphEventHub) {
@@ -235,14 +262,20 @@ public final class CachedGraphTransaction extends GraphTransaction {
             this.holder = null;
             this.cacheEventListener = null;
         }
-        // TODO (follow-up): storeEventListenStatus has the same owner-first
-        // close bug this PR fixes for GRAPH_CACHE_EVENT_LISTENERS. A non-owner
-        // transaction can remove the tracking entry, unlisten its own
-        // never-registered storeEventListener as a no-op, and leave the
-        // original store listener registered but untracked. Apply the same
-        // ref-counted holder pattern in a follow-up PR.
-        if (storeEventListenStatus.remove(graphName) != null) {
-            this.store().provider().unlisten(this.storeEventListener);
+        StoreListenerHolder storeOurs = this.storeHolder;
+        if (storeOurs != null) {
+            STORE_EVENT_LISTENERS.compute(graphName, (key, existing) -> {
+                if (existing == null || existing != storeOurs) {
+                    return existing;
+                }
+                existing.refCount--;
+                if (existing.refCount == 0) {
+                    existing.provider.unlisten(existing.listener);
+                    return null;
+                }
+                return existing;
+            });
+            this.storeHolder = null;
         }
     }
 
@@ -285,129 +318,151 @@ public final class CachedGraphTransaction extends GraphTransaction {
 
     @Override
     @Watched(prefix = "graphcache")
-    protected Iterator<HugeVertex> queryVerticesFromBackend(Query query) {
-        if (this.enableCacheVertex() &&
-            query.idsSize() > 0 && query.conditionsSize() == 0) {
-            return this.queryVerticesByIds((IdQuery) query);
-        } else {
-            return super.queryVerticesFromBackend(query);
+    protected QueryResults<HugeVertex> fetchVertexBatch(Query query) {
+        // Test the leaf: direct paging needs backend metadata, while index paging
+        // takes its cursor from the IdHolder and can cache the ID lookup.
+        if (!this.enableCacheVertex() || query.paging() ||
+            query.idsSize() == 0 || query.conditionsSize() != 0) {
+            return super.fetchVertexBatch(query);
         }
-    }
-
-    @Watched(prefix = "graphcache")
-    private Iterator<HugeVertex> queryVerticesByIds(IdQuery query) {
-        if (query.idsSize() == 1) {
-            Id vertexId = query.ids().iterator().next();
-            HugeVertex vertex = (HugeVertex) this.verticesCache.get(vertexId);
-            if (vertex != null) {
-                if (!vertex.expired()) {
-                    return QueryResults.iterator(vertex);
-                }
-                this.verticesCache.invalidate(vertexId);
-            }
-            Iterator<HugeVertex> rs = super.queryVerticesFromBackend(query);
-            vertex = QueryResults.one(rs);
-            if (vertex == null) {
-                return QueryResults.emptyIterator();
-            }
-            if (needCacheVertex(vertex)) {
-                this.verticesCache.update(vertex.id(), vertex);
-            }
-            return QueryResults.iterator(vertex);
-        }
-
-        IdQuery newQuery = new IdQuery(HugeType.VERTEX, query);
+        QueryResultContext context = new QueryResultContext(query);
+        IdQuery missing = new IdQuery(query.resultType(), query);
         List<HugeVertex> vertices = new ArrayList<>();
-        for (Id vertexId : query.ids()) {
-            HugeVertex vertex = (HugeVertex) this.verticesCache.get(vertexId);
-            if (vertex == null) {
-                newQuery.query(vertexId);
-            } else if (vertex.expired()) {
-                newQuery.query(vertexId);
-                this.verticesCache.invalidate(vertexId);
+        for (Id id : query.ids()) {
+            HugeVertex vertex = (HugeVertex) this.verticesCache.get(id);
+            if (vertex == null || vertex.expired()) {
+                missing.query(id);
+                if (vertex != null) {
+                    this.verticesCache.invalidate(id);
+                }
             } else {
                 vertices.add(vertex);
             }
         }
-
-        // Join results from cache and backend
-        ExtendableIterator<HugeVertex> results = new ExtendableIterator<>();
-        if (!vertices.isEmpty()) {
-            results.extend(vertices.iterator());
-        } else {
-            // Just use the origin query if find none from the cache
-            newQuery = query;
-        }
-
-        if (!newQuery.empty()) {
-            Iterator<HugeVertex> rs = super.queryVerticesFromBackend(newQuery);
-            // Generally there are not too much data with id query
-            ListIterator<HugeVertex> listIterator = QueryResults.toList(rs);
-            for (HugeVertex vertex : listIterator.list()) {
-                // Skip large vertex
-                if (needCacheVertex(vertex)) {
+        if (!missing.empty()) {
+            QueryResults<HugeVertex> fetched = super.fetchVertexBatch(vertices.isEmpty() ? query : missing);
+            if (vertices.isEmpty() && !fetched.batches().hasNext()) {
+                return fetched;
+            }
+            ListIterator<HugeVertex> candidates = QueryResults.toList(fetched.iterator());
+            for (HugeVertex vertex : candidates.list()) {
+                if (this.needCacheVertex(vertex)) {
                     this.verticesCache.update(vertex.id(), vertex);
                 }
+                vertices.add(vertex);
             }
-            results.extend(listIterator);
         }
+        // Keep hits and misses in one logical batch for filtering and ID ordering.
+        return this.filterExpiredBatches(new QueryResults<>(vertices.iterator(), context));
+    }
 
-        return results;
+    @Override
+    protected QueryResults<HugeEdge> queryEdgesFromMemory(Query query) {
+        RamTable ramtable = this.params().ramtable();
+        if (ramtable != null && ramtable.matched(query)) {
+            return new QueryResults<>(ramtable.query(query), query);
+        }
+        return null;
     }
 
     @Override
     @Watched(prefix = "graphcache")
-    protected Iterator<HugeEdge> queryEdgesFromBackend(Query query) {
-        RamTable ramtable = this.params().ramtable();
-        if (ramtable != null && ramtable.matched(query)) {
-            return ramtable.query(query);
+    protected QueryResults<HugeEdge> fetchEdgeBatch(Query query) {
+        QueryResultContext context = new QueryResultContext(query);
+        List<Query> chain = context.queries();
+        Query request = chain.get(chain.size() - 1);
+        if (!this.enableCacheEdge() || request.empty() || request.paging() || request.bigCapacity()) {
+            return super.fetchEdgeBatch(query);
         }
-
-        if (!this.enableCacheEdge() || query.empty() ||
-            query.paging() || query.bigCapacity()) {
-            // Query all edges or query edges in paging, don't cache it
-            return super.queryEdgesFromBackend(query);
-        }
-
-        Id cacheKey = new QueryId(query);
-        Object value = this.edgesCache.get(cacheKey);
-        @SuppressWarnings("unchecked")
-        Collection<HugeEdge> edges = (Collection<HugeEdge>) value;
-        if (value != null) {
-            for (HugeEdge edge : edges) {
+        Id cacheKey = new QueryId(request);
+        Id batchKey = new QueryId(query);
+        // An empty label denotes the outer request itself without duplicating its text.
+        String batchLabel = batchKey.equals(cacheKey) ? "" : batchKey.asString();
+        CachedEdgeQuery group = new CachedEdgeQuery(this.edgesCache.get(cacheKey));
+        Collection<HugeEdge> cached = group.get(batchLabel);
+        if (cached != null) {
+            for (HugeEdge edge : cached) {
                 if (edge.expired()) {
                     this.edgesCache.invalidate(cacheKey);
-                    value = null;
+                    cached = null;
                     break;
                 }
             }
         }
+        if (cached != null) {
+            return this.filterExpiredBatches(new QueryResults<>(cached.iterator(), context));
+        }
+        QueryResults<HugeEdge> fetched = super.fetchEdgeBatch(query);
+        if (!fetched.batches().hasNext()) {
+            this.cacheEdgeBatch(cacheKey, batchLabel, Collections.emptyList());
+            return fetched;
+        }
+        return fetched.mapBatches(batch -> {
+            Iterator<HugeEdge> source = batch.results();
+            List<HugeEdge> candidates = new ArrayList<>(MAX_CACHE_EDGES_PER_QUERY + 1);
+            // Limit probing to this batch; never request another batch to fill the cache.
+            while (candidates.size() <= MAX_CACHE_EDGES_PER_QUERY && source.hasNext()) {
+                candidates.add(source.next());
+            }
+            if (candidates.size() <= MAX_CACHE_EDGES_PER_QUERY) {
+                this.cacheEdgeBatch(cacheKey, batchLabel, candidates);
+            }
+            return new QueryBatch<>(
+                    new ExtendableIterator<>(candidates.iterator(), source), batch.context());
+        });
+    }
 
-        if (value != null) {
-            // Not cached or the cache expired
-            return edges.iterator();
+    private void cacheEdgeBatch(Id cacheKey, String batchLabel, List<HugeEdge> candidates) {
+        synchronized (this.edgesCache) {
+            CachedEdgeQuery existing = new CachedEdgeQuery(this.edgesCache.get(cacheKey)).copy();
+            if (existing.put(batchLabel, candidates)) {
+                this.edgesCache.update(cacheKey, existing.values);
+            }
+        }
+    }
+
+    /** Nested lists retain the existing off-heap cache's serialization support. */
+    private static final class CachedEdgeQuery {
+
+        // Alternating batch query strings and raw candidate lists; never store filter closures.
+        private final List<Object> values;
+
+        @SuppressWarnings("unchecked")
+        private CachedEdgeQuery(Object cached) {
+            this.values = cached == null ? new ArrayList<>() :
+                          (List<Object>) cached;
         }
 
-        Iterator<HugeEdge> rs = super.queryEdgesFromBackend(query);
-
-        /*
-         * Iterator can't be cached, caching list instead
-         * there may be super node and too many edges in a query,
-         * try fetch a few of the head results and determine whether to cache.
-         */
-        final int tryMax = 1 + MAX_CACHE_EDGES_PER_QUERY;
-        edges = new ArrayList<>(tryMax);
-        for (int i = 0; rs.hasNext() && i < tryMax; i++) {
-            edges.add(rs.next());
+        private CachedEdgeQuery copy() {
+            return new CachedEdgeQuery(new ArrayList<>(this.values));
         }
 
-        if (edges.isEmpty()) {
-            this.edgesCache.update(cacheKey, Collections.emptyList());
-        } else if (edges.size() <= MAX_CACHE_EDGES_PER_QUERY) {
-            this.edgesCache.update(cacheKey, edges);
+        @SuppressWarnings("unchecked")
+        public Collection<HugeEdge> get(String batch) {
+            for (int i = 0; i < this.values.size(); i += 2) {
+                if (this.values.get(i).equals(batch)) {
+                    return (List<HugeEdge>) this.values.get(i + 1);
+                }
+            }
+            return null;
         }
 
-        return new ExtendableIterator<>(edges.iterator(), rs);
+        public boolean put(String batch, List<HugeEdge> candidates) {
+            if (this.get(batch) != null) {
+                return false;
+            }
+            int size = candidates.size();
+            for (int i = 1; i < this.values.size(); i += 2) {
+                size += ((List<?>) this.values.get(i)).size();
+            }
+            if (size > MAX_CACHE_EDGES_PER_QUERY ||
+                this.values.size() / 2 >= MAX_CACHE_EDGES_PER_QUERY) {
+                return false;
+            }
+            this.values.add(batch);
+            this.values.add(new ArrayList<>(candidates));
+            return true;
+        }
     }
 
     @Override
@@ -474,6 +529,29 @@ public final class CachedGraphTransaction extends GraphTransaction {
                 this.edgesCache.clear();
                 this.notifyChanges(Cache.ACTION_CLEAR, HugeType.EDGE);
             }
+        }
+    }
+
+    /*
+     * Listener lifetime must cover all active transactions for the graph.
+     * The holder is removed from the registry and unregistered from the
+     * BackendStoreProvider only when the last transaction releases it.
+     * Mirror of CacheListenerHolder for the store event path.
+     */
+    private static final class StoreListenerHolder {
+
+        final EventListener listener;
+        final BackendStoreProvider provider;
+        // Must only be read or written inside ConcurrentMap.compute() for the
+        // enclosing registry; ConcurrentHashMap.compute() serialises per-key
+        // access.
+        int refCount;
+
+        StoreListenerHolder(EventListener listener,
+                            BackendStoreProvider provider) {
+            this.listener = listener;
+            this.provider = provider;
+            this.refCount = 1;
         }
     }
 }

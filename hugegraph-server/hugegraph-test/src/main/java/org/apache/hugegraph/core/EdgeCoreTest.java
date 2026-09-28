@@ -499,27 +499,7 @@ public class EdgeCoreTest extends BaseCoreTest {
         });
 
         String backend = graph.backend();
-        if (backend.equals("postgresql")) {
-            Assert.assertThrows(BackendException.class, () -> {
-                james.addEdge("write", book, "time", "2017-5-27\u0000");
-                graph.tx().commit();
-            }, e -> {
-                // pgsql need to clear and reset state (like auto-commit)
-                graph.tx().rollback();
-                Assert.assertContains("invalid byte sequence for encoding " +
-                                      "\"UTF8\": 0x00",
-                                      e.getCause().getMessage());
-            });
-
-            Assert.assertThrows(BackendException.class, () -> {
-                graph.traversal().V(james.id())
-                     .outE("write").has("time", "2017-5-27\u0000")
-                     .toList();
-            }, e -> {
-                Assert.assertContains("Zero bytes may not occur in string " +
-                                      "parameters", e.getCause().getMessage());
-            });
-        } else if (ImmutableSet.of("rocksdb", "hbase", "hstore").contains(backend)) {
+        if (ImmutableSet.of("rocksdb", "hbase", "hstore").contains(backend)) {
             Assert.assertThrows(IllegalArgumentException.class, () -> {
                 james.addEdge("write", book, "time", "2017-5-27\u0000");
                 graph.tx().commit();
@@ -2684,6 +2664,25 @@ public class EdgeCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryEdgesByNonConsecutiveDuplicateIds() {
+        HugeGraph graph = graph();
+        init18Edges();
+
+        List<Edge> allEdges = graph.traversal().E().toList();
+        Assert.assertTrue("need at least 2 edges", allEdges.size() >= 2);
+
+        Object id1 = allEdges.get(0).id();
+        Object id2 = allEdges.get(1).id();
+
+        // Graph API does not guarantee duplicate results for duplicate ids
+        List<Edge> edges = ImmutableList.copyOf(graph.edges(id1, id2, id1));
+        Assert.assertEquals(3, edges.size());
+        Assert.assertEquals(id1, edges.get(0).id());
+        Assert.assertEquals(id2, edges.get(1).id());
+        Assert.assertEquals(id1, edges.get(2).id());
+    }
+
+    @Test
     public void testQueryEdgesByIdWithGraphAPIAndNotCommittedUpdate() {
         HugeGraph graph = graph();
         init18Edges();
@@ -2911,9 +2910,6 @@ public class EdgeCoreTest extends BaseCoreTest {
         Assert.assertEquals(3, edges.get(0).value("score"));
         Assert.assertEquals(3, edges.get(1).value("score"));
 
-        // TODO: Seems Cassandra Bug if contains null value #862
-        //edges = graph.traversal().E().hasValue(3).toList();
-        //Assert.assertEquals(3, edges.size());
     }
 
     @Test
@@ -3565,7 +3561,8 @@ public class EdgeCoreTest extends BaseCoreTest {
 
     @Test
     public void testQueryOutEdgesOfVertexBySortkeyWithRange() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -3663,7 +3660,8 @@ public class EdgeCoreTest extends BaseCoreTest {
 
     @Test
     public void testQueryOutEdgesOfVertexBySortkeyWithPrefix() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -3761,7 +3759,8 @@ public class EdgeCoreTest extends BaseCoreTest {
 
     @Test
     public void testQueryOutEdgesOfVertexBySortkeyWithPrefixInPage() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -3876,7 +3875,8 @@ public class EdgeCoreTest extends BaseCoreTest {
 
     @Test
     public void testQueryOutEdgesOfVertexBySortkeyWithMoreFields() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -4097,7 +4097,8 @@ public class EdgeCoreTest extends BaseCoreTest {
 
     @Test
     public void testQueryOutEdgesOfVertexBySortkeyWithMoreFieldsInPage() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -4791,6 +4792,38 @@ public class EdgeCoreTest extends BaseCoreTest {
     }
 
     @Test
+    public void testQueryByRepeatedRangePredicates() {
+        HugeGraph graph = graph();
+        SchemaManager schema = graph.schema();
+
+        schema.indexLabel("transferByTimestamp").onE("transfer").range()
+              .by("timestamp").create();
+
+        Vertex source = graph.addVertex(T.label, "person", "name", "source",
+                                        "city", "Beijing", "age", 20);
+        Vertex target = graph.addVertex(T.label, "person", "name", "target",
+                                        "city", "Beijing", "age", 21);
+        source.addEdge("transfer", target, "id", 1, "amount", 1.0F,
+                       "timestamp", -4L, "message", "test");
+        graph.tx().commit();
+
+        List<Edge> edges = graph.traversal().E()
+                                .has("timestamp", -4L)
+                                .has("timestamp", P.lte(4L)).toList();
+        Assert.assertEquals(1, edges.size());
+
+        long count = graph.traversal().E()
+                          .has("timestamp", -4L)
+                          .has("timestamp", P.lte(4L)).count().next();
+        Assert.assertEquals(1L, count);
+
+        count = graph.traversal().E()
+                     .has("timestamp", P.lte(4L))
+                     .has("timestamp", -4L).count().next();
+        Assert.assertEquals(1L, count);
+    }
+
+    @Test
     public void testQueryByNegativeFloatProperty() {
         HugeGraph graph = graph();
         SchemaManager schema = graph.schema();
@@ -5129,6 +5162,16 @@ public class EdgeCoreTest extends BaseCoreTest {
         Assert.assertEquals(2, edges.size());
 
         edges = graph.traversal().E().hasLabel("authored")
+                     .has("score", P.within(3, 4, 5))
+                     .has("contribution", Text.contains("2"))
+                     .toList();
+        Assert.assertEquals(2, edges.size());
+        assertContains(edges, "authored", james, book2,
+                       "contribution", "1992 2 2", "score", 4);
+        assertContains(edges, "authored", james, book3,
+                       "contribution", "1993 3 2", "score", 3);
+
+        edges = graph.traversal().E().hasLabel("authored")
                      .has("score", P.gt(3))
                      .has("contribution", Text.contains("3"))
                      .toList();
@@ -5225,7 +5268,8 @@ public class EdgeCoreTest extends BaseCoreTest {
 
     @Test
     public void testScanEdgeInPaging() {
-        // FIXME: skip this test for hstore
+        // FIXME: The legacy HStore guard and related coverage debt are tracked in
+        // https://github.com/apache/hugegraph/issues/3090
         Assume.assumeTrue("skip this test for hstore",
                           Objects.equals("hstore", System.getProperty("backend")));
 
@@ -5240,14 +5284,9 @@ public class EdgeCoreTest extends BaseCoreTest {
         ConditionQuery query = new ConditionQuery(HugeType.EDGE);
 
         String backend = graph.backend();
-        if (backend.equals("cassandra") || backend.equals("scylladb")) {
-            query.scan(String.valueOf(Long.MIN_VALUE),
-                       String.valueOf(Long.MAX_VALUE));
-        } else {
-            // QUESTION: The query method may not be well adapted
-            query.scan(BackendTable.ShardSplitter.START,
-                       BackendTable.ShardSplitter.END);
-        }
+        // QUESTION: The query method may not be well adapted
+        query.scan(BackendTable.ShardSplitter.START,
+                   BackendTable.ShardSplitter.END);
 
         query.limit(1);
         String page = PageInfo.PAGE_NONE;
@@ -5339,6 +5378,43 @@ public class EdgeCoreTest extends BaseCoreTest {
             count += size.intValue();
         }
         Assert.assertEquals(2, count);
+    }
+
+    @Test
+    public void testQueryOutEdgesOfVertexInPagingAtBatchBoundary() {
+        HugeGraph graph = graph();
+        Assume.assumeTrue("Not support paging",
+                          storeFeatures().supportsQueryByPage());
+        // More edges than BackendEntryIterator.INLINE_BATCH_SIZE (500)
+        int total = 1200;
+        Vertex louise = graph.addVertex(T.label, "person", "name", "Louise",
+                                        "city", "Beijing", "age", 21);
+        Vertex java1 = graph.addVertex(T.label, "book", "name", "java-1");
+        for (int i = 0; i < total; i++) {
+            louise.addEdge("look", java1, "time", String.format("2017-%04d", i));
+        }
+        graph.tx().commit();
+
+        // A page limit ending exactly at a batch boundary (500, 1000) used to
+        // re-emit the last edge of a page as the first edge of the next page
+        for (int limit : new int[]{400, 500, 600, 1000}) {
+            Set<Object> ids = new HashSet<>();
+            int count = 0;
+            String page = PageInfo.PAGE_NONE;
+            while (page != null) {
+                GraphTraversal<Vertex, Edge> iterator = graph.traversal()
+                                                             .V(louise).outE("look")
+                                                             .has("~page", page)
+                                                             .limit(limit);
+                while (iterator.hasNext()) {
+                    ids.add(iterator.next().id());
+                    count++;
+                }
+                page = TraversalUtil.page(iterator);
+            }
+            Assert.assertEquals("limit " + limit, total, count);
+            Assert.assertEquals("limit " + limit, total, ids.size());
+        }
     }
 
     @Test
@@ -5871,8 +5947,7 @@ public class EdgeCoreTest extends BaseCoreTest {
         Assert.assertEquals(3, edges.get(0).value("id"));
 
         String backend = graph.backend();
-        Set<String> nonZeroBackends = ImmutableSet.of("postgresql",
-                                                      "rocksdb", "hbase", "hstore");
+        Set<String> nonZeroBackends = ImmutableSet.of("rocksdb", "hbase", "hstore");
         if (nonZeroBackends.contains(backend)) {
             Assert.assertThrows(Exception.class, () -> {
                 louise.addEdge("strike", sean, "id", 4,

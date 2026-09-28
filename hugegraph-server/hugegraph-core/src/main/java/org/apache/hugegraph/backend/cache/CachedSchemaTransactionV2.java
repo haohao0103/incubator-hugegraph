@@ -47,15 +47,21 @@ import com.google.common.collect.ImmutableSet;
 
 public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
 
-    private static final String ID_CACHE_PREFIX = "schema-id";
-    private static final String NAME_CACHE_PREFIX = "schema-name";
+    /*
+     * V1 and V2 transactions can coexist in the same JVM for graphs with the
+     * same name but different backends. Keep their cache entries isolated:
+     * besides holding different schema data, their attachments use different
+     * SchemaCaches classes and therefore can't be shared safely.
+     */
+    private static final String ID_CACHE_PREFIX = "schema-v2-id";
+    private static final String NAME_CACHE_PREFIX = "schema-v2-name";
 
     // MetaDriver doesn't expose unlisten, register the meta listener once.
     // Lifecycle: this JVM-global flag is intentionally never reset by
-    // unlistenChanges() (the underlying gRPC watch is process-wide). If that
-    // watch is silently dropped after a transport reconnect, recovery is not
-    // automatic; resetMetaListenerForReconnect() is only a manual hook to let
-    // the next schema operation install a fresh watch.
+    // unlistenChanges() (the underlying gRPC watch is process-wide). The driver
+    // watch self-heals across transport reconnects (PdMetaDriver via KvClient,
+    // EtcdMetaDriver via Watch.Listener re-subscribe), so the subscription stays
+    // live and the flag staying true is correct.
     private static final AtomicBoolean metaEventListenerRegistered =
             new AtomicBoolean(false);
 
@@ -248,27 +254,6 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
             String graphName = event.graph();
             LOG.debug("Graph {} clear schema cache on meta event", graphName);
             clearSchemaCache(graphName);
-        }
-    }
-
-    /**
-     * Manually reset the JVM-global meta listener flag after detecting that
-     * the MetaManager transport reconnected and dropped the underlying gRPC
-     * watch. This method is not wired to a MetaManager/MetaDriver reconnect
-     * callback today; callers must invoke it explicitly after detecting that
-     * condition. Without such a manual reset {@link #metaEventListenerRegistered}
-     * would stay {@code true} forever and this JVM would stop receiving
-     * cross-node schema cache clear events with no error or warning.
-     *
-     * <p>TODO: wire this into MetaManager once it exposes a transport
-     * reconnect callback (e.g. {@code listenReconnect} /
-     * {@code onTransportReconnect}). Until then it must be invoked
-     * explicitly by code that detects the reconnect.
-     */
-    public static void resetMetaListenerForReconnect() {
-        if (metaEventListenerRegistered.compareAndSet(true, false)) {
-            LOG.warn("Schema cache clear meta listener lost on reconnect - " +
-                     "will re-register on next schema operation.");
         }
     }
 
@@ -482,6 +467,7 @@ public class CachedSchemaTransactionV2 extends SchemaTransactionV2 {
         // Clear schema info firstly
         super.clear();
         this.clearCache(false);
+        this.notifySchemaCacheClear();
     }
 
     private static final class SchemaCaches<V extends SchemaElement> {

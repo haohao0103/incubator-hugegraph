@@ -47,7 +47,7 @@ public class CoreOptions extends OptionHolder {
     public static final ConfigOption<String> STORE =
             new ConfigOption<>(
                     "store",
-                    "The database name like Cassandra Keyspace.",
+                    "The backend database name.",
                     disallowEmpty(),
                     "hugegraph"
             );
@@ -67,7 +67,7 @@ public class CoreOptions extends OptionHolder {
     public static final ConfigOption<String> SERIALIZER =
             new ConfigOption<>(
                     "serializer",
-                    "The serializer for backend store, like: text/binary/cassandra.",
+                    "The serializer for backend store, like: text/binary.",
                     disallowEmpty(),
                     "text"
             );
@@ -295,13 +295,7 @@ public class CoreOptions extends OptionHolder {
                     rangeInt(1, 500),
                     1
             );
-    public static final ConfigOption<String> SCHEDULER_TYPE =
-            new ConfigOption<>(
-                    "task.scheduler_type",
-                    "The type of scheduler used in distribution system.",
-                    allowValues("local", "distributed"),
-                    "local"
-            );
+
     public static final ConfigOption<Boolean> TASK_SYNC_DELETION =
             new ConfigOption<>(
                     "task.sync_deletion",

@@ -48,6 +48,7 @@ import org.apache.hugegraph.backend.id.IdGenerator;
 import org.apache.hugegraph.backend.id.SnowflakeIdGenerator;
 import org.apache.hugegraph.backend.query.Query;
 import org.apache.hugegraph.backend.serializer.AbstractSerializer;
+import org.apache.hugegraph.backend.serializer.BytesBuffer;
 import org.apache.hugegraph.backend.serializer.SerializerFactory;
 import org.apache.hugegraph.backend.store.BackendFeatures;
 import org.apache.hugegraph.backend.store.BackendProviderFactory;
@@ -176,7 +177,6 @@ public class StandardHugeGraph implements HugeGraph {
     private final BackendStoreProvider storeProvider;
     private final TinkerPopTransaction tx;
     private final RamTable ramtable;
-    private final String schedulerType;
     private volatile boolean started;
     private volatile boolean closed;
     private volatile GraphMode mode;
@@ -225,20 +225,34 @@ public class StandardHugeGraph implements HugeGraph {
 
         this.taskManager = TaskManager.instance();
         this.name = config.get(CoreOptions.STORE);
+
+        // Keep old config files upgrade-safe while ignoring the legacy scheduler.
+        if (config.containsKey("task.scheduler_type")) {
+            LOG.warn("Config key 'task.scheduler_type' is deprecated and " +
+                     "ignored. The scheduler is auto-selected by backend " +
+                     "type (hstore -> distributed, others -> local).");
+        }
+
         this.started = false;
         this.closed = false;
         this.mode = GraphMode.NONE;
         this.readMode = GraphReadMode.OLTP_ONLY;
-        this.schedulerType = config.get(CoreOptions.SCHEDULER_TYPE);
 
-        LockUtil.init(this.spaceGraphName());
-
+        // Init process-wide static configs before lock, so that validation
+        // failures won't leave stale lock groups in LockManager.
+        boolean explicitBufferCapacity = config.containsKey(
+                CoreOptions.SERIALIZER_BUFFER_MAX_CAPACITY.name());
+        BytesBuffer.initMaxBufferCapacity(
+                config.get(CoreOptions.SERIALIZER_BUFFER_MAX_CAPACITY),
+                explicitBufferCapacity);
         MemoryManager.setMemoryMode(
                 MemoryManager.MemoryMode.fromValue(config.get(CoreOptions.MEMORY_MODE)));
         MemoryManager.setMaxMemoryCapacityInBytes(config.get(CoreOptions.MAX_MEMORY_CAPACITY));
         MemoryManager.setMaxMemoryCapacityForOneQuery(
                 config.get(CoreOptions.ONE_QUERY_MAX_MEMORY_CAPACITY));
         RoundUtil.setAlignment(config.get(CoreOptions.MEMORY_ALIGNMENT));
+
+        LockUtil.init(this.spaceGraphName());
 
         try {
             this.storeProvider = this.loadStoreProvider();
@@ -250,10 +264,25 @@ public class StandardHugeGraph implements HugeGraph {
         }
 
         if (isHstore()) {
-            // TODO: parameterize the remaining configurations
-            MetaManager.instance().connect("hg", MetaManager.MetaDriverType.PD,
-                                           "ca", "ca", "ca",
-                                           config.get(CoreOptions.PD_PEERS));
+            MetaManager meta = MetaManager.instance();
+            String cluster = config.get(CoreOptions.PD_CLUSTER);
+            if (!meta.isReady()) {
+                // Fallback for usePD=false: with usePD=true the server has
+                // already connected the MetaManager under ServerOptions.CLUSTER
+                // (the meta keys are prefixed with the cluster name)
+                // TODO: parameterize the remaining configurations
+                meta.connect(cluster, MetaManager.MetaDriverType.PD,
+                             "ca", "ca", "ca", config.get(CoreOptions.PD_PEERS));
+            } else if (config.containsKey(CoreOptions.PD_CLUSTER.name()) &&
+                       !cluster.equals(meta.cluster())) {
+                // The prefix is bound once per process: the server's 'cluster'
+                // or the first hstore graph opened wins, a later different
+                // 'pd.cluster' would otherwise be dropped silently
+                LOG.warn("Graph '{}' sets pd.cluster='{}' but the meta cluster is " +
+                         "already bound to '{}' (keys under HUGEGRAPH/{}/); the " +
+                         "graph's value is ignored", this.name(), cluster,
+                         meta.cluster(), meta.cluster());
+            }
         }
 
         try {
@@ -315,6 +344,7 @@ public class StandardHugeGraph implements HugeGraph {
         return this.storeProvider.type();
     }
 
+    @Override
     public BackendStoreInfo backendStoreInfo() {
         // Just for trigger Tx.getOrNewTransaction, then load 3 stores
         // TODO: pass storeProvider.metaStore()
@@ -332,11 +362,10 @@ public class StandardHugeGraph implements HugeGraph {
         LOG.info("Init system info for graph '{}'", this.spaceGraphName());
         this.initSystemInfo();
 
-        LOG.info("Init server info [{}-{}] for graph '{}'...",
-                 nodeInfo.nodeId(), nodeInfo.nodeRole(), this.spaceGraphName());
-        this.serverInfoManager().initServerInfo(nodeInfo);
-
-        this.initRoleStateMachine(nodeInfo.nodeId());
+        if (nodeInfo != null && nodeInfo.nodeId() != null) {
+            this.serverInfoManager().initServerInfo(nodeInfo);
+            this.initRoleStateMachine(nodeInfo.nodeId());
+        }
 
         // TODO: check necessary?
         LOG.info("Check olap property-key tables for graph '{}'", this.spaceGraphName());
@@ -465,6 +494,7 @@ public class StandardHugeGraph implements HugeGraph {
         this.updateTime = updateTime;
     }
 
+    @Override
     public void waitStarted() {
         // Just for trigger Tx.getOrNewTransaction, then load 3 stores
         this.schemaTransaction();
@@ -481,9 +511,7 @@ public class StandardHugeGraph implements HugeGraph {
         try {
             this.storeProvider.init();
             /*
-             * NOTE: The main goal is to write the serverInfo to the central
-             * node, such as etcd, and also create the system schema in memory,
-             * which has no side effects
+             * NOTE: Create system schema in memory, which has no side effects.
              */
             this.initSystemInfo();
         } finally {
@@ -506,6 +534,13 @@ public class StandardHugeGraph implements HugeGraph {
 
         LockUtil.lock(this.spaceGraphName(), LockUtil.GRAPH_LOCK);
         try {
+            if (this.isHstore()) {
+                E.checkState(this.schemaTransaction() instanceof
+                             CachedSchemaTransactionV2,
+                             "The HStore schema transaction must be %s",
+                             CachedSchemaTransactionV2.class.getSimpleName());
+                ((CachedSchemaTransactionV2) this.schemaTransaction()).clear();
+            }
             this.storeProvider.clear();
         } finally {
             LockUtil.unlock(this.spaceGraphName(), LockUtil.GRAPH_LOCK);
@@ -524,8 +559,7 @@ public class StandardHugeGraph implements HugeGraph {
         LockUtil.lock(this.spaceGraphName(), LockUtil.GRAPH_LOCK);
         try {
             this.storeProvider.truncate();
-            // TODO: remove this after serverinfo saved in etcd
-            this.serverStarted(this.serverInfoManager().globalNodeRoleInfo());
+            this.serverStarted(null);
         } finally {
             LockUtil.unlock(this.spaceGraphName(), LockUtil.GRAPH_LOCK);
         }
@@ -547,7 +581,6 @@ public class StandardHugeGraph implements HugeGraph {
     public void initSystemInfo() {
         try {
             this.taskScheduler().init();
-            this.serverInfoManager().init();
             this.authManager().init();
         } finally {
             this.closeTx();
@@ -1644,7 +1677,9 @@ public class StandardHugeGraph implements HugeGraph {
 
         @Override
         public String schedulerType() {
-            return StandardHugeGraph.this.schedulerType;
+            // Use distributed scheduler for hstore backend, otherwise use local
+            // After the merger of rocksdb and hstore, consider whether to change this logic
+            return StandardHugeGraph.this.isHstore() ? "distributed" : "local";
         }
     }
 

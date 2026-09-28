@@ -130,3 +130,32 @@ HUGEGRAPH_VERSION=1.7.0 docker compose -f docker-compose-3pd-3store-3server.yml 
 
 See [docker/README.md](../../../docker/README.md) for the full setup guide,
 environment variable reference, and troubleshooting.
+
+## 6. Process Supervision & Health Checks
+
+All four HugeGraph Docker images (PD, Store, Server, Server-hstore) include
+native `HEALTHCHECK` instructions. `docker ps` shows real health status:
+
+| Image | Health endpoint |
+|---|---|
+| `hugegraph/hugegraph` | `GET /versions` on port 8080 |
+| `hugegraph/hugegraph-hstore` | `GET /versions` on port 8080 |
+| `hugegraph/hugegraph-pd` | `GET /v1/health` on port 8620 |
+| `hugegraph/hugegraph-store` | `GET /v1/health` on port 8520 |
+
+The entrypoints supervise the Java process directly — when Java exits, the container exits. If started with a restart policy (the provided compose files use `restart: unless-stopped`), Docker will bring it back automatically. The old cron-based monitor (`-m true`) is for VM/bare-metal deployments only and is not used in Docker images.
+
+`HG_SERVER_STARTUP_TIMEOUT_S` sets how long the Server entrypoint waits for that REST port before ending the container: whole seconds from 1 to 86400, 120 by default. Anything outside the range, an empty value included, stops the container at startup rather than falling back silently. The Compose topologies under `docker/` pass it through with an unset-only default, so `HG_SERVER_STARTUP_TIMEOUT_S=300 docker compose up -d` raises it without editing a Compose file.
+
+<details>
+<summary>Startup budget and health check budget are two clocks</summary>
+
+Raise the startup budget on slow or contended hosts, and wherever an orchestrator already owns it through a probe of its own: a startup probe cannot extend a container that has already ended the JVM it was waiting for.
+
+```bash
+docker run -itd --name=graph -p 8080:8080 -e HG_SERVER_STARTUP_TIMEOUT_S=450 hugegraph/hugegraph:1.7.0
+```
+
+Raising it does not move the health check above. The images set `--interval=15s --start-period=90s --retries=3`, so a container given a longer startup budget is reported `unhealthy` around 135 seconds while the entrypoint is still legitimately waiting; raise it with `--health-start-period` on `docker run`. The Compose files replace those values with their own (`start_period: 60s`, `interval: 10s`, `retries: 30`, so roughly 360 seconds), and anything gated on `depends_on: condition: service_healthy`, Hubble included, waits on that budget rather than on this variable. Move the two together.
+
+</details>
