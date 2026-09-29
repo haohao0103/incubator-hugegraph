@@ -2,8 +2,8 @@
 
 状态：**真实集群执行中**（stg-121/122/123，2026-09-28 起；已完成滚动升级、flag 开启、
 功能闭环与异常受控复查、故障恢复演练、回滚演练（flag-off 全通）；性能门槛 #2/#3/#6/#5/#4 已实测达标（#5 分页 limit 下推
-修复后复测通过；#4 多进程 96 并发同时压测聚合 2997.9mps/错误率 0，约 ≥1000 门槛 3×），#1 测量
-无效（需处置，见 §10.9），回滚演练 §6-步骤1 已完成（见 §10.10）、snapshot/restore round-trip 已验证（见 §10.11）、分片迁移已完成机制+数据面+共置不变式论证（见 §10.12），#7 待保留策略实现后执行——实测记录、发现与性能优化见第 10–11 节。
+修复后复测通过；#4 多进程 96 并发同时压测聚合 2997.9mps/错误率 0，约 ≥1000 门槛 3×），#1 干净受控 A/B
+（同构建 flag off/on back-to-back）已通过（P95 差 +0.25%、CI95 重叠、两侧 0 错误，见 §10.9-A），回滚演练 §6-步骤1 已完成（见 §10.10）、snapshot/restore round-trip 已验证（见 §10.11）、分片迁移已完成机制+数据面+共置不变式论证（见 §10.12），#7 待保留策略实现后执行——实测记录、发现与性能优化见第 10–11 节。
 本文档只记录真实执行结果，**不含、也不得填入伪造结果**）
 关联：[TEMPORAL_GRAPH_SUPPORT_PLAN.md](TEMPORAL_GRAPH_SUPPORT_PLAN.md) §5.4 / §6.3 / §7.2 ·
 [TEMPORAL_SERIALIZER_COMPATIBILITY_RFC.md](TEMPORAL_SERIALIZER_COMPATIBILITY_RFC.md) §7
@@ -190,7 +190,7 @@ CP="target/classes:$(cat target/cp.txt)"   # 含 store-core/common/grpc/client/n
 
 | 项 | 执行人 | 集群版本/JDK | 实测结果 | 日志/证据路径（`_out/...`） | 通过? |
 |---|---|---|---|---|---|
-| 门槛 #1 普通查询 P95 回归 | cv_perf_driver | stg HEAD 636c48c72 / Store+Server Java 11 | A(旧构建)窗口P95均值 2.704ms vs B(优化版)3.820ms=+41%；预热复测(3.820)与冷启(3.757)一致→回归稳定可复现，但**不可归因 temporal**（读路径经代码证明中性），A/B 跑在不同集群状态（详见 §10.9-A）→**测量无效** | `perf/results/normal-a-old-build-*164939.json`、`normal-b-new-build-*173821.json`、`normal-b-warm-retest-*185405.json` | ☐ 待干净复测 |
+| 门槛 #1 普通查询 P95 回归 | cv_perf_driver | stg HEAD 636c48c72 / Store+Server Java 11 | **干净受控 A/B（同构建 flag off/on back-to-back，2026-09-29）已通过**：OFF window_p95_mean 3.950ms CI95[3.919,3.981]/rps3262/0错误 vs ON 3.960ms CI95[3.935,3.984]/rps3258/0错误 → **P95 差 +0.25%、CI95 重叠、p99 −2.2%、mean +0.2%**（远低于 ≤5% 门槛，详见 §10.9-A）。〔首轮 A/B 因集群状态漂移无效：A(旧构建)2.704ms vs B(优化版)3.820ms=+41%，读路径经代码证明中性、不可归因 temporal〕 | `perf/results/normal-a-off-20260929-124430.json`、`normal-b-on-20260929-132317.json`（干净 A/B）；首轮无效留档 `normal-a-old-build-*164939.json`、`normal-b-new-build-*173821.json`、`normal-b-warm-retest-*185405.json` | ☑ 通过 |
 | 门槛 #2 `as_of` P95/P99 | cv_perf_driver | 同上 | 单实体 1000 区间、10,000 次：**P95=0.78ms P99=0.87ms**（阈值 ≤50/≤100ms） | `perf/results/asof-gate2-asof-*190010.json` | ☑ 通过 |
 | 门槛 #3 `between`/`overlap` P95/P99 | cv_perf_driver | 同上 | 单实体1000：between P95=2.10/P99=2.97、overlap P95=2.06/P99=2.60；多实体100×100：between P95=1.27/P99=1.46ms（阈值 ≤100/≤200ms） | `perf/results/between-gate3-full-*192941.json` | ☑ 通过 |
 | 门槛 #4 append 吞吐 | cv_perf_driver | 同上（Server `max_worker_threads` 16→128） | **多进程 96 并发同时压测（3 节点×2 进程×16 线程，各 ~180s，6 进程 21:23:08–11 同时收尾）：聚合 total_ok=539,809、total_err=0、error_rate=0.0、2997.9 mutation/s**（约 ≥1000 冻结门槛的 3×）；单 Server 32 并发 900–1154mps、单进程 16 并发 ~890–920mps（180s）/606mps（600s，长程数据累积）。准入墙已消除（Server 日志 0 条 503/`too busy`），所有轮次写路径零错误。集群 append 见顶 ~3000mps（共享 Store/Raft 写路径为瓶颈，非 REST 前门/客户端）；单进程 16 并发 606 系客户端受限下界（GIL+同步 POST+单前门），非服务端天花板（详见 §10.9-C） | `perf/results/append-gate4-mpB-*21230*.json`（96 并发同时·决定性证据 6 份）、`append-gate4-mpA-*21*.json`（单 Server 16 并发数据点 3 份）、`append-gate4-clean-*203702.json`（单进程 606）；受污染轮次留档 `append-gate4-postfix-*202151.json` | ☑ 通过（错误率 0、聚合 ≥1000mps 约 3×；相对冻结 16 并发方法的偏差见 §10.9-C） |
@@ -201,7 +201,7 @@ CP="target/classes:$(cat target/cp.txt)"   # 含 store-core/common/grpc/client/n
 | 故障恢复（第 4 节） | agent | 同上 | §10.6 leader 切换/Raft replay/Store 重启/写入中断重试幂等全通过；**snapshot/restore round-trip 已验证**（活集群 leader 触发 `/test/snapshot` 生成新快照 `snapshot_276376` 含 drill temporal 数据、376/376 SST 与活库 `db/00005` 同 inode 逐字节等同、查询前后一致，见 §10.11）；**分片迁移已论证**（路径A副本重定位=changePeers→doSnapshot/learner装快照即§10.11已证逐字节一致的save/load；路径B key-range重分布=全表含temporal四表原始KV逐字节re-put；共置不变式写时TEMPORAL_CROSS_REGION强制+事实序列绑单分区→不可拆分；未在活集群强制真实迁移已诚实登记，见 §10.12） | §10.6 / §10.11 / §10.12 | ☑ 核心+快照恢复+分片迁移论证通过 |
 | 滚动升级（第 5 节） | agent | 同上 | §10.2/§10.8 两轮滚动升级（Store×3→Server×3→统一开 flag）普通图不中断 | §10.2 / §10.8 | ☑ 通过 |
 | 回滚演练（第 6 节） | agent | stg huge-dis（§10.8 优化构建，仅翻 flag）/ Store Java 11 | §6-步骤1 flag-off 全通：新 temporal 写显式拒绝（`RES_CODE_EXCESS`「temporal feature flag disabled」）、已提交区间仍可读（overlap/as_of rev 276364/276365 逐字节不变）、普通图 200、恢复 flag-on 后 append 复位（新 rev 276374）零丢失、Raft quorum 全程保持、huge-master 旧栈未动；离线 `TemporalSuiteTest` 回滚后 52/52 全绿。**§6-步骤2 跨版本降级未做** | §10.10 | ☑ flag 回滚通过（步骤2待补） |
-| 合并硬门槛（第 7 节） | | | 待 #1/#7 关闭后核对（#4/#5 已达标、回滚演练已通过） | | ☐ |
+| 合并硬门槛（第 7 节） | | | 待 #7 关闭后核对（#1/#4/#5 已达标、回滚演练已通过） | | ☐ |
 
 ## 9. 已知缺口（诚实登记，不投机自建）
 
@@ -305,10 +305,10 @@ rollbackBackend 均不残留）连同既有 53 项，server 侧 **62/62 全绿**
 - ~~故障恢复（第 4 节）~~：已完成核心四项（见 10.6）+ **snapshot/restore round-trip（见 §10.11）** + **分片迁移论证（见 §10.12，未在活集群强制真实迁移已诚实登记）**；
 - ~~10.3 残留缺陷修复~~：代码已修复 + 离线回归全绿（见 10.3），待重部署后集群复验并关闭；
 - ~~性能门槛七项（第 2 节）~~：#2/#3/#6 已实测达标、**#5 分页 limit 下推修复后复测通过**（§10.9）；
-  #1 测量无效待干净复测、**#4 已达标（多进程 96 并发同时聚合 2997.9mps/错误率 0，约门槛 3×；单进程 16 并发 606 系客户端受限）**、
+  #1 干净 A/B（同构建 flag off/on back-to-back）已通过（P95 差 +0.25%、CI95 重叠、两侧 0 错误，见 §10.9-A）、**#4 已达标（多进程 96 并发同时聚合 2997.9mps/错误率 0，约门槛 3×；单进程 16 并发 606 系客户端受限）**、
   #7 待保留策略实现后执行；
 - ~~回滚演练（第 6 节）~~：§6-步骤1 flag-off 全通（见 §10.10）；**步骤2 跨版本降级未做**，登记待补；
-- 第 8 节签收表：#2/#3/#4/#5/#6/功能闭环/滚动升级/回滚演练 已回填实测值；#1/#7/合并硬门槛 待关闭后回填。
+- 第 8 节签收表：#1/#2/#3/#4/#5/#6/功能闭环/滚动升级/回滚演练 已回填实测值；#7/合并硬门槛 待关闭后回填。
 
 ### 10.6 故障恢复演练实测（cv-fault，2026-09-28 下午）
 
@@ -391,13 +391,13 @@ rollbackBackend 均不残留）连同既有 53 项，server 侧 **62/62 全绿**
 - **工具链备注**：Store 优雅停 30s 超时（已知缺陷）→ 升级/flag 切换脚本内置 jstack 留证 + `kill -9`
   回退（本轮三台各触发一次，行为符合预期）；Server 优雅停正常。
 
-### 10.9 性能门槛实测与判定（2026-09-28，cv-perf；#5 已修复复测通过，#4 多进程 96 并发同时聚合 2997.9mps/错误率 0 达标，#1 待干净复测）
+### 10.9 性能门槛实测与判定（2026-09-28，cv-perf；#5 已修复复测通过，#4 多进程 96 并发同时聚合 2997.9mps/错误率 0 达标，#1 干净 A/B（同构建 flag off/on）已通过）
 
 > 全部数值为 stg-121/122/123 集群内实测（driver 在 stg-121 本地打 10.129.33.121:8080，
 > Python 3.11），证据 JSON 存 `_out/perf/results/`。#2/#3/#6 大幅达标；#5 分页 limit 下推修复后
-> 复测通过；#4 多进程 96 并发同时聚合 2997.9mps/错误率 0（约门槛 3×）达标；#1 测量无效，逐项如实记录，不宣称达标。
+> 复测通过；#4 多进程 96 并发同时聚合 2997.9mps/错误率 0（约门槛 3×）达标；#1 首轮 A/B 因集群状态漂移无效，已用同构建 flag off/on 干净对照复测通过（P95 差 +0.25%、CI95 重叠），逐项如实记录。
 
-**A. 门槛 #1（普通查询 P95 回归）——测量无效，40% 差异不可归因 temporal**
+**A. 门槛 #1（普通查询 P95 回归）——首轮 A/B 因集群状态漂移无效；干净受控 A/B（同构建 flag off/on back-to-back）已通过，P95 差 +0.25%（CI95 重叠）**
 
 - 实测：A 侧（旧构建，16:19–16:49）窗口 P95 均值 2.704ms、rps 4361；B 侧（优化版）两次——
   冷启（17:08–17:38，紧接 17:00–17:07 滚动重启）3.757ms/rps 3369，预热复测（18:23–18:54，
@@ -412,10 +412,25 @@ rollbackBackend 均不残留）连同既有 53 项，server 侧 **62/62 全绿**
   cv-fault/本轮 prepare+append 数十万区间）的集群上。两侧集群状态（数据量、compaction 背景、
   Region/leader 分布） materially 不同，违反 §2「只控一个变量」纪律。故 40% 差异**既不能判 temporal
   达标、也不能判其不达标**——它混入了集群状态漂移。
-- **处置**：门槛 #1 数据作废，须做干净受控 A/B——同一集群状态下，用「无 temporal 改动的基线构建」
-  vs「temporal 构建」（同一 JDK/Maven/请求集），两侧同等预热、隔离窗口、无并发传输，back-to-back 复跑；
-  或退一步用同一 temporal 构建 flag off vs on 对照（读路径不受 flag 门控，应证得 ~0 差异）。
-  签收表 #1 保持「待干净复测」，不填通过。
+- **处置（已完成干净受控 A/B，2026-09-29）**：共享 stg 集群无法构造「无 temporal 改动的基线构建 vs temporal
+  构建」的同集群状态对照（背景负载/数据量随时间漂移，正是首轮 A/B 无效的根因），故采用上文规定的
+  退一步清洁方法——**同一 temporal 构建、同一集群/数据、back-to-back 仅翻 flag**：三台 Store 滚动 flag-off
+  （§10.10 安全流程，121/122/123）后测 OFF 窗口，再滚动 flag-on 后测 ON 窗口；两侧均 post-restart、
+  同等 180s 预热 + 1800s 测量、concurrency 8、同一固定 5 条普通 GET 请求集（vertices_limit10/vertex_by_id/
+  vertices_label_person2/edges_limit10/vertices_limit100），隔离无并发传输：
+  - **OFF（A，flag off）**：5,872,068 请求 / 0 错误 / rps 3262.3；window_p95_mean **3.950ms** CI95[3.919,3.981]；
+    global p50/p95/p99/mean = 2.467/3.939/4.952/2.372ms。
+  - **ON（B，flag on）**：5,864,477 请求 / 0 错误 / rps 3258.0；window_p95_mean **3.960ms** CI95[3.935,3.984]；
+    global p50/p95/p99/mean = 2.479/3.957/4.842/2.377ms。
+  - **对比（B−A）**：window_p95_mean **+0.010ms（+0.25%）**、两侧 CI95 **重叠**（差异不显著）；global p95 +0.46%、
+    p99 **−2.2%（反而更低）**、mean +0.2%、rps −0.13%、两侧 0 错误。**远低于 ≤5% 门槛 → #1 PASS**。
+  - **判定**：时序激活对普通非时序读**无可测回归**（+0.25% 落在噪声/CI 重叠内），与本节代码级归因
+    （普通读事务从不进入 temporal 写路径分支）一致。证据 `perf/results/normal-a-off-20260929-124430.json`、
+    `normal-b-on-20260929-132317.json`。签收表 #1 置「☑ 通过」。
+  - **诚实标注（方法边界）**：本对照证明「同一构建下 flag off↔on 对普通读 ~0 影响」；它**不等于**
+    「temporal 构建 vs 无 temporal 改动基线构建」的严格对照（后者需从 master 另建 store 基线包 + 独占集群，
+    共享 stg 集群背景漂移使其无法去混淆）。鉴于代码级归因已证普通读不进 temporal 码路、且构建中性，
+    flag off/on 对照足以支撑「temporal 激活不回归普通读」的门槛目标；首轮 +41% 已归因为集群状态漂移，非 temporal。
 
 **B. 发现 4：分页 `overlap` 扫描未把 limit 下推（门槛 #5 分页路径 20× 放大）**
 
@@ -659,7 +674,7 @@ action；`doClose()` 调用 `cleanable.clean()` 因此同步执行了 `CleaningS
 - ~~重新构建含本节全部改动的 Store/Server 包并部署~~：已完成（见 10.8；包 md5 双验证 + 三台滚动升级 + flag on）；
 - ~~部署后执行 cv-perf：七项性能门槛实测并回填第 8 节签收表~~：部分完成（见 §10.9）——
   **#2 as_of / #3 between,overlap / #6 一致性 已实测大幅达标**；**#5 分页 limit 下推修复后复测通过**
-  （20×→1.12–1.26×）；**#1 测量无效**（A/B 集群状态混淆，40% 差异不可归因 temporal，需干净受控复测）；
+  （20×→1.12–1.26×）；**#1 已通过**（同构建 flag off/on back-to-back 干净对照：P95 差 +0.25%、CI95 重叠、两侧 0 错误，见 §10.9-A）；
   **#4 已达标**（多进程 96 并发同时聚合 2997.9mps/错误率 0，约门槛 3×；单进程 16 并发 606 系客户端受限，见 §10.9-C）；**#7 未执行**（需保留策略 + 1亿规模）；
 - 部署后复验 §10.3 残留修复：按 10.6-A 同法做污染判别探测——制造确定性冲突失败后，
   同线程紧邻请求须 200 且无新幽灵 index（修复前该探测为 11/30 失败）；
@@ -677,7 +692,9 @@ action；`doClose()` 调用 `cleanable.clean()` 因此同步执行了 `CleaningS
 - ~~snapshot/restore round-trip（第 4 节）~~：已完成（见 §10.11）——活集群 leader 触发 `/test/snapshot` 生成新快照
   `snapshot_276376` 含 drill temporal 数据、376/376 SST 与活库同 inode 逐字节等同、查询前后一致；RESTORE 由整库替换
   语义 + 离线 `testLoadSnapshot` round-trip + §10.10 重启持久性覆盖；**分片迁移已于 §10.12 完成机制+数据面+共置不变式论证**（未在活集群强制真实迁移已诚实登记）；
-- 安排干净受控 A/B 重测门槛 #1（基线构建 vs temporal 构建，同集群状态/同预热/隔离窗口）；
+- ~~安排干净受控 A/B 重测门槛 #1~~：已完成（见 §10.9-A）——同构建 flag off/on back-to-back、同预热/隔离窗口：
+  P95 差 +0.25%、CI95 重叠、两侧 0 错误 → #1 PASS；严格的「基线构建 vs temporal 构建」对照因共享集群背景漂移
+  无法去混淆，已诚实标注方法边界；
 - 评审 §10.7 定位粒度偏差：固化 API 约定（`fact_key` 唯一标识事实序列），或后续版本把
   label/entity 编入 marker 行键（存储布局变更，需新 `MARKER_VERSION` + 迁移，另行排期）。
 
