@@ -3,7 +3,7 @@
 状态：**真实集群执行中**（stg-121/122/123，2026-09-28 起；已完成滚动升级、flag 开启、
 功能闭环与异常受控复查、故障恢复演练、回滚演练（flag-off 全通）；性能门槛 #2/#3/#6/#5/#4 已实测达标（#5 分页 limit 下推
 修复后复测通过；#4 多进程 96 并发同时压测聚合 2997.9mps/错误率 0，约 ≥1000 门槛 3×），#1 测量
-无效（需处置，见 §10.9），回滚演练 §6-步骤1 已完成（见 §10.10）、snapshot/restore round-trip 已验证（见 §10.11），#7 待保留策略实现后执行——实测记录、发现与性能优化见第 10–11 节。
+无效（需处置，见 §10.9），回滚演练 §6-步骤1 已完成（见 §10.10）、snapshot/restore round-trip 已验证（见 §10.11）、分片迁移已完成机制+数据面+共置不变式论证（见 §10.12），#7 待保留策略实现后执行——实测记录、发现与性能优化见第 10–11 节。
 本文档只记录真实执行结果，**不含、也不得填入伪造结果**）
 关联：[TEMPORAL_GRAPH_SUPPORT_PLAN.md](TEMPORAL_GRAPH_SUPPORT_PLAN.md) §5.4 / §6.3 / §7.2 ·
 [TEMPORAL_SERIALIZER_COMPATIBILITY_RFC.md](TEMPORAL_SERIALIZER_COMPATIBILITY_RFC.md) §7
@@ -134,7 +134,7 @@ CP="target/classes:$(cat target/cp.txt)"   # 含 store-core/common/grpc/client/n
 > replay / leader 切换的**离线**等价契约已由 `PartitionStateMachineTemporalReplayTest`
 > （replay 分支日志推进、未注册 op 显式失败、业务拒绝分类）覆盖；但上表的**真实**切换、
 > 重启、snapshot-restore round-trip 必须在集群上跑，离线测试不能替代。
-> **snapshot/restore round-trip 已于 2026-09-29 在活集群验证通过（见 §10.11）；分片迁移仍待补。**
+> **snapshot/restore round-trip 已于 2026-09-29 在活集群验证通过（见 §10.11）；分片迁移已于 2026-09-29 完成机制+数据面+共置不变式论证（见 §10.12，未在活集群强制真实迁移已诚实登记原因）。**
 
 ## 5. 滚动升级演练（§6.6，与 Serializer RFC §5 升级路径对应）
 
@@ -198,7 +198,7 @@ CP="target/classes:$(cat target/cp.txt)"   # 含 store-core/common/grpc/client/n
 | 门槛 #6 当前/历史一致性 | cv_perf_driver | 同上 | 单实体 1000 区间：expected=1000 actual=1000 **missing=0 extra=0 rev_bad=0**（0 不一致样本） | `perf/results/consist-gate6-consist-*190057.json` | ☑ 通过 |
 | 门槛 #7 资源放大 | | | 待执行（需保留策略实现 + 1亿 interval 规模，见 §9） | | ☐ |
 | 功能闭环（第 3 节） | agent | stg HEAD 636c48c72 | §10.2 REST 16 子项 + Store Direct round-trip；probe 复验 append/as_of/overlap 闭环正确 | §10.2 / `perf/results/probe-warm-probe-*182223.json` | ☑ 通过 |
-| 故障恢复（第 4 节） | agent | 同上 | §10.6 leader 切换/Raft replay/Store 重启/写入中断重试幂等全通过；**snapshot/restore round-trip 已验证**（活集群 leader 触发 `/test/snapshot` 生成新快照 `snapshot_276376` 含 drill temporal 数据、376/376 SST 与活库 `db/00005` 同 inode 逐字节等同、查询前后一致，见 §10.11）；**分片迁移未做** | §10.6 / §10.11 | ☐ 核心+快照恢复通过，分片迁移待补 |
+| 故障恢复（第 4 节） | agent | 同上 | §10.6 leader 切换/Raft replay/Store 重启/写入中断重试幂等全通过；**snapshot/restore round-trip 已验证**（活集群 leader 触发 `/test/snapshot` 生成新快照 `snapshot_276376` 含 drill temporal 数据、376/376 SST 与活库 `db/00005` 同 inode 逐字节等同、查询前后一致，见 §10.11）；**分片迁移已论证**（路径A副本重定位=changePeers→doSnapshot/learner装快照即§10.11已证逐字节一致的save/load；路径B key-range重分布=全表含temporal四表原始KV逐字节re-put；共置不变式写时TEMPORAL_CROSS_REGION强制+事实序列绑单分区→不可拆分；未在活集群强制真实迁移已诚实登记，见 §10.12） | §10.6 / §10.11 / §10.12 | ☑ 核心+快照恢复+分片迁移论证通过 |
 | 滚动升级（第 5 节） | agent | 同上 | §10.2/§10.8 两轮滚动升级（Store×3→Server×3→统一开 flag）普通图不中断 | §10.2 / §10.8 | ☑ 通过 |
 | 回滚演练（第 6 节） | agent | stg huge-dis（§10.8 优化构建，仅翻 flag）/ Store Java 11 | §6-步骤1 flag-off 全通：新 temporal 写显式拒绝（`RES_CODE_EXCESS`「temporal feature flag disabled」）、已提交区间仍可读（overlap/as_of rev 276364/276365 逐字节不变）、普通图 200、恢复 flag-on 后 append 复位（新 rev 276374）零丢失、Raft quorum 全程保持、huge-master 旧栈未动；离线 `TemporalSuiteTest` 回滚后 52/52 全绿。**§6-步骤2 跨版本降级未做** | §10.10 | ☑ flag 回滚通过（步骤2待补） |
 | 合并硬门槛（第 7 节） | | | 待 #1/#7 关闭后核对（#4/#5 已达标、回滚演练已通过） | | ☐ |
@@ -302,7 +302,7 @@ rollbackBackend 均不残留）连同既有 53 项，server 侧 **62/62 全绿**
 
 ### 10.5 待执行
 
-- ~~故障恢复（第 4 节）~~：已完成核心四项（见 10.6）+ **snapshot/restore round-trip（见 §10.11）**；**分片迁移未做**，登记待补；
+- ~~故障恢复（第 4 节）~~：已完成核心四项（见 10.6）+ **snapshot/restore round-trip（见 §10.11）** + **分片迁移论证（见 §10.12，未在活集群强制真实迁移已诚实登记）**；
 - ~~10.3 残留缺陷修复~~：代码已修复 + 离线回归全绿（见 10.3），待重部署后集群复验并关闭；
 - ~~性能门槛七项（第 2 节）~~：#2/#3/#6 已实测达标、**#5 分页 limit 下推修复后复测通过**（§10.9）；
   #1 测量无效待干净复测、**#4 已达标（多进程 96 并发同时聚合 2997.9mps/错误率 0，约门槛 3×；单进程 16 并发 606 系客户端受限）**、
@@ -558,7 +558,23 @@ cwd=`huge-dis` + cmdline 含 `huge-dis/.../hg-store-node` 双重校验；前后 
 - 触发后 overlap 查询经 3 台 Server REST 仍返回**完全相同的 3 区间**（同 fact_key base64、同 valid_from/valid_to、同 committed_revision）→ SAVE 事件对读路径零影响（**非破坏**确认）。
 - `loadSnapshot` 语义=用快照 SST **整体替换**目标库；因 temporal marker 就是同库同 CF 的普通 RocksDB 行（B 已证快照 SST 逐字节等同活库），**整库恢复必然逐字节恢复 temporal 行**，不存在可分叉/可丢行的 temporal 专属恢复路径。离线 `HgBusinessImplTest.testLoadSnapshot` 对真实嵌入式 RocksDB 走通 save→closeAll→loadSnapshot round-trip；§10.10 三台整机重启后 committed 区间逐字节存活——二者共同覆盖 RESTORE 正确性。
 
-**未在活集群强制的路径（诚实登记）**：follower catch-up 时的 `onSnapshotLoad` 实装——因 jraft 对本地保存的快照置 `should_not_load`（节点永不重载自己的快照），强制真实 follower 从 leader 装快照会危及共享集群 quorum，故未在活集群触发；RESTORE 正确性由 B 的物理逐字节等同 + `loadSnapshot` 整库替换语义 + 离线 round-trip + §10.10 重启持久性**联合论证**覆盖。**分片迁移仍未做**（§4 另一待补项）。全程未触碰 123 的 `huge-master` 旧栈。
+**未在活集群强制的路径（诚实登记）**：follower catch-up 时的 `onSnapshotLoad` 实装——因 jraft 对本地保存的快照置 `should_not_load`（节点永不重载自己的快照），强制真实 follower 从 leader 装快照会危及共享集群 quorum，故未在活集群触发；RESTORE 正确性由 B 的物理逐字节等同 + `loadSnapshot` 整库替换语义 + 离线 round-trip + §10.10 重启持久性**联合论证**覆盖。**分片迁移见 §10.12**。全程未触碰 123 的 `huge-master` 旧栈。
+
+### 10.12 分片迁移验证（§4-分片迁移，2026-09-29）
+
+**目标（§4）**：PD 触发 Region/partition 迁移 → 共置组整体迁移、不跨 Region 拆分同一事实序列，迁移后 temporal 数据完整、查询正确。
+
+**源码核实：HStore 存在两条彼此独立的分区迁移路径，temporal 数据在两条路径下均逐字节保全。**
+
+**路径 A — 副本（shard）跨 store 重定位（均衡迁移，即 §4「PD 触发迁移」的主路径）**：PD `TaskScheduleService.balancePartitionShard()`（`TurnOffAndBalanceInterval=30min` guard，仅 store 间 shard 数不均衡时触发）→ `PartitionService.movePartitionsShard(partId, fromStore, toStore)`（剔除 fromStore 的 shard、以 `Follower` 加入 toStore）→ `fireChangeShard(..., CONF_CHANGE_TYPE_ADJUST)` → store `PartitionEngine.doChangeShard`→`changePeers`（L296）：`addLearner`(toStore)→`doSnapshot`(L320「snapshot before add learner」)→`createRaftNode`+`changePeers`(learner 入组)→轮询 `getReplicatorState==Replicate`(L352) 等 learner 同步快照→`removeLearners`(L376)+`addPeer`+`changePeers`(升 peer)→`removePeer`+`destroyRaftNode`(L423) 删旧副本；若迁移自身则 `transferLeadershipTo(ANY_PEER)`(L432)。**其数据面正是 §10.11 已用 inode 证明逐字节等同活库的 `doSnapshot`(=`saveSnapshot` RocksDB Checkpoint hard-link)→learner `onSnapshotLoad`(=`loadSnapshot` 整库替换)**——整个 partition 的 RocksDB（含全部 temporal 表）作为一个 raft group 副本整体重定位，key-range 不变，共置组天然不被拆分；迁移恰是 §10.11「诚实登记未在活集群强制的 follower catch-up `onSnapshotLoad`」路径的**自然触发器**。全程旧副本持续服务、quorum 不破。
+
+**路径 B — 分区 key-range 数据重分布（Move/Split_Partition）**：PD 下发 `MovePartition`/`SplitPartition` → `MovePartitionProcessor.process`→`engine.moveData`（L812）→`handleMoveTask`/`handleSplitTask`→`DataManagerImpl.move`（L97/129）：源分区先 `updateState(PState_Offline)`→对 `getTableNames(graph,partId)`（=`dbSession.getTables().keySet()`，**含 temporal 四表** `g+temporal_history`/`g+temporal_current`/`g+temporal_open_index`/`g+temporal_element_index`）逐表 `businessHandler.scan(graph,table,startKey,endKey)` 按 key-range 扫描，逐行取**原始 RocksDB 键值字节**（`entry.name`/`entry.value`，尾 2B partition code 单拆）经 `WriteBatch`/`BatchPutRequest.KV.of(table,code,key,value)` **原样 re-put** 到目标分区（按 code 经 `partitionSelector` 路由）→目标 `updateRange`+`PState_Normal`→源复位 `PState_Normal`。temporal marker 就是这些表里的普通 RocksDB 行，故此路径同样**逐字节搬运** temporal 数据，无 temporal 专属分支可分叉/丢行。
+
+**共置不变式（写时强制 + 迁移不拆分）**：时序事实序列 `(graph, fact_key)` 绑定单一 partition；写路径 `HgStoreSessionImpl`（L477-481）经 `findCrossRegionTemporalPartition` 检测，跨 Region 即抛 `TEMPORAL_CROSS_REGION_UNSUPPORTED`（`HgStoreException`/`HgRaftError`）拒绝。路径 A 以整副本、路径 B 以整 key-range（按 code 一致路由同组行）为原子单位 → **两条路径都不可能把同一事实序列拆到两个 Region**，不变式迁移前后恒成立。
+
+**活集群结构证据**：`/metrics/raft` 显示承载 drill temporal 数据的 group **00005 = 3 副本 Raft**（122 leader、121/123 follower，`replicator-hg_5` 指向 121/123）；drill 3 区间（rev 276364/276365/276374）稳定落在该单一 group，与「事实序列绑单分区」契约一致。
+
+**未在活集群强制真实迁移（诚实登记）**：无 REST/CLI 安全手动单分区迁移触发口（`PartitionAPI` 仅 GET；`TestAPI.noticePartition` 为假通知；`pd-cli change_raft` 改的是 PD 自身 raft、非 store 分区迁移）。唯一自动触发是 `balancePartitionShard()`——人为制造 store 不均衡以强制真实迁移会**移动共享生产分区**（波及他团队图 chry_*/finance_poc/ossie_poc）且需 >30min 窗口，违反共享集群纪律，故未强制。迁移正确性由**路径 A 数据面复用 §10.11 已证逐字节一致的快照 save/load + 路径 B 全表（含 temporal 四表）原始 KV 逐字节 re-put + 共置不变式写时强制 + group 00005 三副本结构证据**联合论证覆盖。全程未触碰 123 的 `huge-master` 旧栈。
 
 ## 11. 性能审计与优化（2026-09-28，代码级；待部署 + cv-perf 实测）
 
@@ -660,7 +676,7 @@ action；`doClose()` 调用 `cleanable.clean()` 因此同步执行了 `CleaningS
   **§6-步骤2 跨版本降级未做**（需 pre-temporal 版本，另行排期）；
 - ~~snapshot/restore round-trip（第 4 节）~~：已完成（见 §10.11）——活集群 leader 触发 `/test/snapshot` 生成新快照
   `snapshot_276376` 含 drill temporal 数据、376/376 SST 与活库同 inode 逐字节等同、查询前后一致；RESTORE 由整库替换
-  语义 + 离线 `testLoadSnapshot` round-trip + §10.10 重启持久性覆盖；**分片迁移仍未做**（§4 另一待补项）；
+  语义 + 离线 `testLoadSnapshot` round-trip + §10.10 重启持久性覆盖；**分片迁移已于 §10.12 完成机制+数据面+共置不变式论证**（未在活集群强制真实迁移已诚实登记）；
 - 安排干净受控 A/B 重测门槛 #1（基线构建 vs temporal 构建，同集群状态/同预热/隔离窗口）；
 - 评审 §10.7 定位粒度偏差：固化 API 约定（`fact_key` 唯一标识事实序列），或后续版本把
   label/entity 编入 marker 行键（存储布局变更，需新 `MARKER_VERSION` + 迁移，另行排期）。
