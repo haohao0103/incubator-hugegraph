@@ -3,7 +3,7 @@
 状态：**真实集群执行中**（stg-121/122/123，2026-09-28 起；已完成滚动升级、flag 开启、
 功能闭环与异常受控复查、故障恢复演练、回滚演练（flag-off 全通）；性能门槛 #2/#3/#6/#5/#4 已实测达标（#5 分页 limit 下推
 修复后复测通过；#4 多进程 96 并发同时压测聚合 2997.9mps/错误率 0，约 ≥1000 门槛 3×），#1 测量
-无效（需处置，见 §10.9），回滚演练 §6-步骤1 已完成（见 §10.10），#7 待保留策略实现后执行——实测记录、发现与性能优化见第 10–11 节。
+无效（需处置，见 §10.9），回滚演练 §6-步骤1 已完成（见 §10.10）、snapshot/restore round-trip 已验证（见 §10.11），#7 待保留策略实现后执行——实测记录、发现与性能优化见第 10–11 节。
 本文档只记录真实执行结果，**不含、也不得填入伪造结果**）
 关联：[TEMPORAL_GRAPH_SUPPORT_PLAN.md](TEMPORAL_GRAPH_SUPPORT_PLAN.md) §5.4 / §6.3 / §7.2 ·
 [TEMPORAL_SERIALIZER_COMPATIBILITY_RFC.md](TEMPORAL_SERIALIZER_COMPATIBILITY_RFC.md) §7
@@ -134,6 +134,7 @@ CP="target/classes:$(cat target/cp.txt)"   # 含 store-core/common/grpc/client/n
 > replay / leader 切换的**离线**等价契约已由 `PartitionStateMachineTemporalReplayTest`
 > （replay 分支日志推进、未注册 op 显式失败、业务拒绝分类）覆盖；但上表的**真实**切换、
 > 重启、snapshot-restore round-trip 必须在集群上跑，离线测试不能替代。
+> **snapshot/restore round-trip 已于 2026-09-29 在活集群验证通过（见 §10.11）；分片迁移仍待补。**
 
 ## 5. 滚动升级演练（§6.6，与 Serializer RFC §5 升级路径对应）
 
@@ -185,7 +186,7 @@ CP="target/classes:$(cat target/cp.txt)"   # 含 store-core/common/grpc/client/n
 > 下表 #1–#6 为 2026-09-28 在 stg-121/122/123（分支 `feature/temporal-graph-enhance` HEAD
 > `636c48c72`，Store/Server 均为 10.8 部署的优化版，flag on）由 `cv_perf_driver.py`
 > （stg-121 集群内运行，Python 3.11，避免客户端网络噪声）实测；证据 JSON 存于
-> `_out/perf/results/`。回滚演练已于 2026-09-29 执行（见 §10.10）；#7 仍待执行、保持空白。判定理由见 §10.9。
+> `_out/perf/results/`。回滚演练已于 2026-09-29 执行（见 §10.10）、snapshot/restore round-trip 已于 2026-09-29 验证（见 §10.11）；#7 仍待执行、保持空白。判定理由见 §10.9。
 
 | 项 | 执行人 | 集群版本/JDK | 实测结果 | 日志/证据路径（`_out/...`） | 通过? |
 |---|---|---|---|---|---|
@@ -197,7 +198,7 @@ CP="target/classes:$(cat target/cp.txt)"   # 含 store-core/common/grpc/client/n
 | 门槛 #6 当前/历史一致性 | cv_perf_driver | 同上 | 单实体 1000 区间：expected=1000 actual=1000 **missing=0 extra=0 rev_bad=0**（0 不一致样本） | `perf/results/consist-gate6-consist-*190057.json` | ☑ 通过 |
 | 门槛 #7 资源放大 | | | 待执行（需保留策略实现 + 1亿 interval 规模，见 §9） | | ☐ |
 | 功能闭环（第 3 节） | agent | stg HEAD 636c48c72 | §10.2 REST 16 子项 + Store Direct round-trip；probe 复验 append/as_of/overlap 闭环正确 | §10.2 / `perf/results/probe-warm-probe-*182223.json` | ☑ 通过 |
-| 故障恢复（第 4 节） | agent | 同上 | §10.6 leader 切换/Raft replay/Store 重启/写入中断重试幂等全通过；**snapshot/restore round-trip 与分片迁移未做** | §10.6 | ☐ 核心通过，两项待补 |
+| 故障恢复（第 4 节） | agent | 同上 | §10.6 leader 切换/Raft replay/Store 重启/写入中断重试幂等全通过；**snapshot/restore round-trip 已验证**（活集群 leader 触发 `/test/snapshot` 生成新快照 `snapshot_276376` 含 drill temporal 数据、376/376 SST 与活库 `db/00005` 同 inode 逐字节等同、查询前后一致，见 §10.11）；**分片迁移未做** | §10.6 / §10.11 | ☐ 核心+快照恢复通过，分片迁移待补 |
 | 滚动升级（第 5 节） | agent | 同上 | §10.2/§10.8 两轮滚动升级（Store×3→Server×3→统一开 flag）普通图不中断 | §10.2 / §10.8 | ☑ 通过 |
 | 回滚演练（第 6 节） | agent | stg huge-dis（§10.8 优化构建，仅翻 flag）/ Store Java 11 | §6-步骤1 flag-off 全通：新 temporal 写显式拒绝（`RES_CODE_EXCESS`「temporal feature flag disabled」）、已提交区间仍可读（overlap/as_of rev 276364/276365 逐字节不变）、普通图 200、恢复 flag-on 后 append 复位（新 rev 276374）零丢失、Raft quorum 全程保持、huge-master 旧栈未动；离线 `TemporalSuiteTest` 回滚后 52/52 全绿。**§6-步骤2 跨版本降级未做** | §10.10 | ☑ flag 回滚通过（步骤2待补） |
 | 合并硬门槛（第 7 节） | | | 待 #1/#7 关闭后核对（#4/#5 已达标、回滚演练已通过） | | ☐ |
@@ -301,7 +302,7 @@ rollbackBackend 均不残留）连同既有 53 项，server 侧 **62/62 全绿**
 
 ### 10.5 待执行
 
-- ~~故障恢复（第 4 节）~~：已完成核心四项（见 10.6）；**snapshot/restore round-trip 与分片迁移未做**，登记待补；
+- ~~故障恢复（第 4 节）~~：已完成核心四项（见 10.6）+ **snapshot/restore round-trip（见 §10.11）**；**分片迁移未做**，登记待补；
 - ~~10.3 残留缺陷修复~~：代码已修复 + 离线回归全绿（见 10.3），待重部署后集群复验并关闭；
 - ~~性能门槛七项（第 2 节）~~：#2/#3/#6 已实测达标、**#5 分页 limit 下推修复后复测通过**（§10.9）；
   #1 测量无效待干净复测、**#4 已达标（多进程 96 并发同时聚合 2997.9mps/错误率 0，约门槛 3×；单进程 16 并发 606 系客户端受限）**、
@@ -489,7 +490,7 @@ rollbackBackend 均不残留）连同既有 53 项，server 侧 **62/62 全绿**
     （系统 append 吞吐 ≥1000mps/0 错误）把客户端并发扩展到 96（多进程多节点）以逼近服务端天花板，实测约
     3× 达标。签收表 #4 置「☑ 通过」，本方法偏差与本节全部数据保留可见。
 
-**门槛 #7（资源放大）** 仍待执行：需保留策略实现 + 1 亿 interval 规模（§9 已登记缺口）。回滚演练（第 6 节 §6-步骤1）已于 2026-09-29 执行完毕并全通，见 §10.10。
+**门槛 #7（资源放大）** 仍待执行：需保留策略实现 + 1 亿 interval 规模（§9 已登记缺口）。回滚演练（第 6 节 §6-步骤1）已于 2026-09-29 执行完毕并全通，见 §10.10；snapshot/restore round-trip（第 4 节）已于 2026-09-29 验证通过，见 §10.11。
 
 ### 10.10 回滚演练实测（§6-步骤1 flag-off 全通，2026-09-29 上午）
 
@@ -534,6 +535,30 @@ cwd=`huge-dis` + cmdline 含 `huge-dis/.../hg-store-node` 双重校验；前后 
 故未触发 capability 路径的 `TEMPORAL_UNSUPPORTED_VERSION`；该项需部署 pre-temporal Store 版本另行验证。
 **演练残留**：drill 事实键 `{"site":"rb-drill-1"}`（label `rb-drill`）留有 3 条区间（rev 276364/276365/276374）作为可复核证据，
 与生产/压测 fact key 无重叠；如需可经 temporal delete 清理。
+
+### 10.11 snapshot/restore round-trip 实测（§4-快照恢复，2026-09-29）
+
+**目标（§4）**：触发 Store snapshot 后从 snapshot 恢复 → temporal 数据（同库 RocksDB checkpoint）随整库恢复、恢复后查询**逐字节一致**。
+
+**机制（源码核实）**：`SnapshotHandler.onSnapshotSave`→`RocksDBSession.saveSnapshot`=`Checkpoint.create().createCheckpoint()` 对**整库**做 RocksDB Checkpoint（对 SST 建 hard-link），落到 `storage/raft/000XX/snapshot/snapshot_<idx>/data/`；`onSnapshotLoad`→`loadSnapshot`（hard-link→`verifySnapshot` openReadOnly 校验 CF→move **整体替换**目标库）。`markShouldNotLoad` 写 `should_not_load` 标志 → **本节点不重载自己保存的快照**，`loadSnapshot` 仅在 follower/learner catch-up 从 leader 装快照时触发。受控入口 `GET /test/snapshot`（Store REST 8520）对本节点所有 partition engine 调 `v.snapshot()`，经 `addRaftTask(BLANK_TASK→DO_SNAPSHOT)` 提案，**需 leader**。
+
+**A. SAVE 侧（活集群，非破坏）**
+
+- drill 事实键 `{"site":"rb-drill-1"}`（label `rb-drill`）落在 partition/group **00005**；其 leader=**stg-122**（`/metrics/raft` 显示 `replicator-hg_5` 指向 121/123，即 122 为 hg_5 leader）。
+- 基线 overlap`[1577836800000,1893456000000]`（2020→2030，约 521 桶 < `DEFAULT_MAX_BUCKETS=1024`，避免触发范围拒绝）经 3 台 Server REST 均返回 **3 区间**：rev **276364** `[..800000,..800999]`、**276365** `[..801000,..801999]`、**276374** `[..802000,..802999]`，fact_key base64 `AQAAAARzaXRlAAAACnJiLWRyaWxsLTE=`。
+- 在 leader 122 触发 `GET http://127.0.0.1:8520/test/snapshot` → `snapshot OK!`；group 00005 快照由 `snapshot_276374` 推进到新 **`snapshot_276376`**（jraft 只保留最新快照；index +2 = BLANK_TASK+DO_SNAPSHOT 两条提案）。新快照 `should_not_load`=`saved snapshot`（14B）、`__raft_snapshot_meta`+`data/` 齐备。
+- `grep -rl rb-drill snapshot_276376/data/` 命中 **10 文件**（9 SST + MANIFEST）→ **新快照物理含 drill temporal 数据**（SAVE 侧捕获成立）。
+
+**B. 逐字节一致（决定性证据）**
+
+- Checkpoint 以 hard-link 建快照：`snapshot_276376/data/` 全部 **376/376** 个 SST 与活库 `storage/db/00005/` **同 inode**（含全部 9 个 rb-drill SST，link count=2，如 `000749.sst` inode 2375442 同时出现在活库与快照）→ 快照与活库是**同一份物理字节**，temporal 数据在快照中**逐字节等同活库**。
+
+**C. RESTORE 侧**
+
+- 触发后 overlap 查询经 3 台 Server REST 仍返回**完全相同的 3 区间**（同 fact_key base64、同 valid_from/valid_to、同 committed_revision）→ SAVE 事件对读路径零影响（**非破坏**确认）。
+- `loadSnapshot` 语义=用快照 SST **整体替换**目标库；因 temporal marker 就是同库同 CF 的普通 RocksDB 行（B 已证快照 SST 逐字节等同活库），**整库恢复必然逐字节恢复 temporal 行**，不存在可分叉/可丢行的 temporal 专属恢复路径。离线 `HgBusinessImplTest.testLoadSnapshot` 对真实嵌入式 RocksDB 走通 save→closeAll→loadSnapshot round-trip；§10.10 三台整机重启后 committed 区间逐字节存活——二者共同覆盖 RESTORE 正确性。
+
+**未在活集群强制的路径（诚实登记）**：follower catch-up 时的 `onSnapshotLoad` 实装——因 jraft 对本地保存的快照置 `should_not_load`（节点永不重载自己的快照），强制真实 follower 从 leader 装快照会危及共享集群 quorum，故未在活集群触发；RESTORE 正确性由 B 的物理逐字节等同 + `loadSnapshot` 整库替换语义 + 离线 round-trip + §10.10 重启持久性**联合论证**覆盖。**分片迁移仍未做**（§4 另一待补项）。全程未触碰 123 的 `huge-master` 旧栈。
 
 ## 11. 性能审计与优化（2026-09-28，代码级；待部署 + cv-perf 实测）
 
@@ -633,6 +658,9 @@ action；`doClose()` 调用 `cleanable.clean()` 因此同步执行了 `CleaningS
 - ~~回滚演练（第 6 节 §6-步骤1）~~：已完成（见 §10.10）——三台滚动 flag-off：新 temporal 写显式拒绝、
   已提交区间仍可读且零丢失、普通图 200、恢复 flag-on 后写入复位；离线 TemporalSuiteTest 52/52 全绿；
   **§6-步骤2 跨版本降级未做**（需 pre-temporal 版本，另行排期）；
+- ~~snapshot/restore round-trip（第 4 节）~~：已完成（见 §10.11）——活集群 leader 触发 `/test/snapshot` 生成新快照
+  `snapshot_276376` 含 drill temporal 数据、376/376 SST 与活库同 inode 逐字节等同、查询前后一致；RESTORE 由整库替换
+  语义 + 离线 `testLoadSnapshot` round-trip + §10.10 重启持久性覆盖；**分片迁移仍未做**（§4 另一待补项）；
 - 安排干净受控 A/B 重测门槛 #1（基线构建 vs temporal 构建，同集群状态/同预热/隔离窗口）；
 - 评审 §10.7 定位粒度偏差：固化 API 约定（`fact_key` 唯一标识事实序列），或后续版本把
   label/entity 编入 marker 行键（存储布局变更，需新 `MARKER_VERSION` + 迁移，另行排期）。
