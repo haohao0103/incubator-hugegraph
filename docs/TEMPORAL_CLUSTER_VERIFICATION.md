@@ -1,9 +1,9 @@
 # Temporal 真实集群验证清单（脚手架 + 签收表）
 
 状态：**真实集群执行中**（stg-121/122/123，2026-09-28 起；已完成滚动升级、flag 开启、
-功能闭环与异常受控复查、故障恢复演练；性能门槛 #2/#3/#6/#5/#4 已实测达标（#5 分页 limit 下推
+功能闭环与异常受控复查、故障恢复演练、回滚演练（flag-off 全通）；性能门槛 #2/#3/#6/#5/#4 已实测达标（#5 分页 limit 下推
 修复后复测通过；#4 多进程 96 并发同时压测聚合 2997.9mps/错误率 0，约 ≥1000 门槛 3×），#1 测量
-无效（需处置，见 §10.9），#7 与回滚演练待执行——实测记录、发现与性能优化见第 10–11 节。
+无效（需处置，见 §10.9），回滚演练 §6-步骤1 已完成（见 §10.10），#7 待保留策略实现后执行——实测记录、发现与性能优化见第 10–11 节。
 本文档只记录真实执行结果，**不含、也不得填入伪造结果**）
 关联：[TEMPORAL_GRAPH_SUPPORT_PLAN.md](TEMPORAL_GRAPH_SUPPORT_PLAN.md) §5.4 / §6.3 / §7.2 ·
 [TEMPORAL_SERIALIZER_COMPATIBILITY_RFC.md](TEMPORAL_SERIALIZER_COMPATIBILITY_RFC.md) §7
@@ -153,12 +153,15 @@ CP="target/classes:$(cat target/cp.txt)"   # 含 store-core/common/grpc/client/n
 
 ## 6. 回滚演练（§5.1 回滚语义 / §6.6）
 
-1. [ ] 关 flag 回滚：以 `JAVA_OPTS` 不含该属性（或 `=false`）重启 Store。
+1. [x] 关 flag 回滚：以 `JAVA_OPTS` 不含该属性（或 `=false`）重启 Store。
    - 验证：新 temporal 写被拒；**已提交日志仍能 replay**（flag 不拦 apply/replay）；普通图正常。
+   - **实测（2026-09-29，stg 三台滚动 flag-off → 回滚态复验 → 恢复 flag-on）：全通，见 §10.10。**
 2. [ ] 降级到不支持 temporal 的旧版本（如需）：
    - 验证：普通图继续可用；temporal 数据**不得**按普通 vertex/edge/property 解读；
      capability 路径显式返回 `TEMPORAL_UNSUPPORTED_VERSION`；有显式告警。
-3. [ ] 回滚后跑离线 `TemporalSuiteTest`（应仍 52 项全绿）+ 普通图全量回归。
+   - **未做（诚实登记）**：步骤 1 是同构建翻 flag、非跨版本降级；本项需部署 pre-temporal Store 版本另行验证（见 §10.10 末）。
+3. [x] 回滚后跑离线 `TemporalSuiteTest`（应仍 52 项全绿）+ 普通图全量回归。
+   - **实测：回滚后 `TemporalSuiteTest` 52/52 全绿（failures=0/errors=0，含 `TemporalFeatureFlagTest`）；普通图读写全程 200，见 §10.10。**
 
 ## 7. 合并前硬门槛核对（§7.2）
 
@@ -182,7 +185,7 @@ CP="target/classes:$(cat target/cp.txt)"   # 含 store-core/common/grpc/client/n
 > 下表 #1–#6 为 2026-09-28 在 stg-121/122/123（分支 `feature/temporal-graph-enhance` HEAD
 > `636c48c72`，Store/Server 均为 10.8 部署的优化版，flag on）由 `cv_perf_driver.py`
 > （stg-121 集群内运行，Python 3.11，避免客户端网络噪声）实测；证据 JSON 存于
-> `_out/perf/results/`。#7 与回滚演练仍待执行，保持空白。判定理由见 §10.9。
+> `_out/perf/results/`。回滚演练已于 2026-09-29 执行（见 §10.10）；#7 仍待执行、保持空白。判定理由见 §10.9。
 
 | 项 | 执行人 | 集群版本/JDK | 实测结果 | 日志/证据路径（`_out/...`） | 通过? |
 |---|---|---|---|---|---|
@@ -196,8 +199,8 @@ CP="target/classes:$(cat target/cp.txt)"   # 含 store-core/common/grpc/client/n
 | 功能闭环（第 3 节） | agent | stg HEAD 636c48c72 | §10.2 REST 16 子项 + Store Direct round-trip；probe 复验 append/as_of/overlap 闭环正确 | §10.2 / `perf/results/probe-warm-probe-*182223.json` | ☑ 通过 |
 | 故障恢复（第 4 节） | agent | 同上 | §10.6 leader 切换/Raft replay/Store 重启/写入中断重试幂等全通过；**snapshot/restore round-trip 与分片迁移未做** | §10.6 | ☐ 核心通过，两项待补 |
 | 滚动升级（第 5 节） | agent | 同上 | §10.2/§10.8 两轮滚动升级（Store×3→Server×3→统一开 flag）普通图不中断 | §10.2 / §10.8 | ☑ 通过 |
-| 回滚演练（第 6 节） | | | 待执行 | | ☐ |
-| 合并硬门槛（第 7 节） | | | 待 #1/#4/#5/#7 与回滚演练关闭后核对 | | ☐ |
+| 回滚演练（第 6 节） | agent | stg huge-dis（§10.8 优化构建，仅翻 flag）/ Store Java 11 | §6-步骤1 flag-off 全通：新 temporal 写显式拒绝（`RES_CODE_EXCESS`「temporal feature flag disabled」）、已提交区间仍可读（overlap/as_of rev 276364/276365 逐字节不变）、普通图 200、恢复 flag-on 后 append 复位（新 rev 276374）零丢失、Raft quorum 全程保持、huge-master 旧栈未动；离线 `TemporalSuiteTest` 回滚后 52/52 全绿。**§6-步骤2 跨版本降级未做** | §10.10 | ☑ flag 回滚通过（步骤2待补） |
+| 合并硬门槛（第 7 节） | | | 待 #1/#7 关闭后核对（#4/#5 已达标、回滚演练已通过） | | ☐ |
 
 ## 9. 已知缺口（诚实登记，不投机自建）
 
@@ -303,8 +306,8 @@ rollbackBackend 均不残留）连同既有 53 项，server 侧 **62/62 全绿**
 - ~~性能门槛七项（第 2 节）~~：#2/#3/#6 已实测达标、**#5 分页 limit 下推修复后复测通过**（§10.9）；
   #1 测量无效待干净复测、**#4 已达标（多进程 96 并发同时聚合 2997.9mps/错误率 0，约门槛 3×；单进程 16 并发 606 系客户端受限）**、
   #7 待保留策略实现后执行；
-- 回滚演练（第 6 节）；
-- 第 8 节签收表：#2/#3/#5/#6/功能闭环/滚动升级 已回填实测值；#1/#4/#7/回滚/合并硬门槛 待关闭后回填。
+- ~~回滚演练（第 6 节）~~：§6-步骤1 flag-off 全通（见 §10.10）；**步骤2 跨版本降级未做**，登记待补；
+- 第 8 节签收表：#2/#3/#4/#5/#6/功能闭环/滚动升级/回滚演练 已回填实测值；#1/#7/合并硬门槛 待关闭后回填。
 
 ### 10.6 故障恢复演练实测（cv-fault，2026-09-28 下午）
 
@@ -486,7 +489,51 @@ rollbackBackend 均不残留）连同既有 53 项，server 侧 **62/62 全绿**
     （系统 append 吞吐 ≥1000mps/0 错误）把客户端并发扩展到 96（多进程多节点）以逼近服务端天花板，实测约
     3× 达标。签收表 #4 置「☑ 通过」，本方法偏差与本节全部数据保留可见。
 
-**门槛 #7（资源放大）与回滚演练（第 6 节）** 仍待执行：#7 需保留策略实现 + 1 亿 interval 规模（§9 已登记缺口）。
+**门槛 #7（资源放大）** 仍待执行：需保留策略实现 + 1 亿 interval 规模（§9 已登记缺口）。回滚演练（第 6 节 §6-步骤1）已于 2026-09-29 执行完毕并全通，见 §10.10。
+
+### 10.10 回滚演练实测（§6-步骤1 flag-off 全通，2026-09-29 上午）
+
+**方法**：在 stg-121/122/123 huge-dis 部署（§10.8 优化构建，Store Java 11）上，逐台滚动把
+`hugegraph.temporal.enabled` 从 true 翻回缺省（false）——即“关 flag 回滚”。每台：TERM→（优雅停吊住，
+已知 hg-heartbeat 未取消缺陷）→kill-9→清 pidfile→无 `-j` 重启；逐台等 Raft 12 组全部
+`onSnapshotLoad success` + Server REST 200 再动下一台，全程保 quorum（任一时刻至多 1 台 down）。
+**安全边界**：123 与旧栈 `huge-master`（PD 3992 / Store 5045,5055 / Server 5724）共存，重启脚本以
+cwd=`huge-dis` + cmdline 含 `huge-dis/.../hg-store-node` 双重校验；前后 `huge-master` 4 进程逐一存活未动。
+
+**A. flag-off 基线（回滚前，drill 事实键 `{"site":"rb-drill-1"}` / label `rb-drill`）**
+
+- append 2 区间：`[..800000,..800999]`（rev **276364**）、`[..801000,..801999]`（rev **276365**）均 200；
+- as_of@1577836801500 → 1 命中；overlap[..800000,..802000] → 2 命中；普通 vertices 读 200。
+
+**B. 全 3 台 flag-off 后的回滚态验证（决定性）**
+
+| 探针 | 期望 | 实测 |
+|---|---|---|
+| append 新区间 rb-drill-m2 | 显式拒绝 | **HTTP 500，`RES_CODE_EXCESS`「temporal feature flag disabled: all Store nodes must be upgraded and capability handshake must succeed before temporal writes」**；调用栈 `TemporalAPI.append→GraphTransaction.commit→HstoreStore.temporalMutate→NodeTxSessionProxy.temporalMutation→GrpcStoreNodeSessionImpl.temporalMutation`，由 leader store `10.129.33.122:8550` 拒绝 |
+| overlap[..800000,..802000] | 已提交 2 区间仍可读 | **200，rev 276364/276365 逐字节不变** |
+| as_of@1577836801500 | 1 命中 | **200，rev 276365** |
+| 普通 vertices 读 | 200 | **200** |
+| 重启后数据存活 | 已提交区间不丢 | 12 组 `onSnapshotLoad success`；committed 区间（rev 276364/276365 < snapshot committedIndex 191508）经快照载入恢复，overlap/as_of 全 3 台重启后仍逐字节一致 → **snapshot-load/replay 不受 flag 门控**（活集群印证离线 `TemporalFeatureFlagTest.replayIsNotGatedByDisabledFlag`） |
+
+- 三台 Store 日志中 `hugegraph/g` 与 `temporal` 相关 ERROR/Exception **恒 0**；仅有：
+  (a) TERM 窗口 1 条 `hg-heartbeat ... db closed`（已知优雅停缺陷，非重启后故障）；
+  (b) 123 上 2 条 `DEFAULT/chry_gtest_build2/g` partition-not-found——**另一张无关测试图**（非 hugegraph、非 temporal），预存背景噪声，与本演练无关。
+
+**C. 恢复 flag-on（滚动重启带 `-j -Dhugegraph.temporal.enabled=true`）后复位验证**
+
+- append rb-drill-m2 → **200**（写路径复位）；
+- overlap[..800000,..803000] → **3 区间**：rev 276364、276365（回滚前数据完好）+ 新 rev **276374**（m2）；
+- as_of@1577836802500 → 1（新 m2）；普通读 200；
+- 全 3 台 flag=true、Raft 12 组健康、3 Server REST 200；`huge-master` 4 进程始终未动。
+
+**结论**：flag-off 回滚满足 §5.1 回滚语义与回滚安全不变式——新 temporal 写**显式拒绝**（不静默、不落 Raft）、
+**已提交 temporal 数据仍可读且不丢**（读路径/replay 不受 flag 门控）、**普通图完全正常**、恢复 flag-on 后**写入复位、零数据丢失**；
+全程 Raft quorum 保持、旧栈未受影响。离线 `TemporalSuiteTest` 回滚后复跑 **52/52 全绿**（failures=0/errors=0，含 `TemporalFeatureFlagTest`）。
+
+**未覆盖（诚实登记）**：§6-步骤2「降级到不支持 temporal 的旧版本」——本演练是同构建翻 flag、**非跨版本降级**，
+故未触发 capability 路径的 `TEMPORAL_UNSUPPORTED_VERSION`；该项需部署 pre-temporal Store 版本另行验证。
+**演练残留**：drill 事实键 `{"site":"rb-drill-1"}`（label `rb-drill`）留有 3 条区间（rev 276364/276365/276374）作为可复核证据，
+与生产/压测 fact key 无重叠；如需可经 temporal delete 清理。
 
 ## 11. 性能审计与优化（2026-09-28，代码级；待部署 + cv-perf 实测）
 
@@ -583,6 +630,9 @@ action；`doClose()` 调用 `cleanable.clean()` 因此同步执行了 `CleaningS
 - ~~门槛 #4 吞吐定论~~：已定论（见 §10.9-C）——多进程 96 并发同时压测聚合 **2997.9mps/错误率 0**
   （约 ≥1000 门槛 3×），单进程 16 并发 606mps 系客户端受限下界、非服务端天花板；集群 append 见顶
   ~3000mps（共享 Store/Raft 写路径瓶颈）；签收表 #4 置 ☑ 通过（相对冻结 16 并发方法的偏差已诚实标注）；
+- ~~回滚演练（第 6 节 §6-步骤1）~~：已完成（见 §10.10）——三台滚动 flag-off：新 temporal 写显式拒绝、
+  已提交区间仍可读且零丢失、普通图 200、恢复 flag-on 后写入复位；离线 TemporalSuiteTest 52/52 全绿；
+  **§6-步骤2 跨版本降级未做**（需 pre-temporal 版本，另行排期）；
 - 安排干净受控 A/B 重测门槛 #1（基线构建 vs temporal 构建，同集群状态/同预热/隔离窗口）；
 - 评审 §10.7 定位粒度偏差：固化 API 约定（`fact_key` 唯一标识事实序列），或后续版本把
   label/entity 编入 marker 行键（存储布局变更，需新 `MARKER_VERSION` + 迁移，另行排期）。
