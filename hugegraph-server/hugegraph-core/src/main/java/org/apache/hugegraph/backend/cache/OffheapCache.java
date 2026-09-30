@@ -51,7 +51,9 @@ public class OffheapCache extends AbstractCache<Id, Object> {
     private static final long VALUE_SIZE_TO_SKIP = 100 * Bytes.KB;
 
     private final OHCache<Id, Value> cache;
-    private final HugeGraph graph;
+    // NOTE: not final, a same-name graph recreated after drop reuses this
+    // cache and must rebind it to the new (live) instance, see rebind()
+    private volatile HugeGraph graph;
     private final AbstractSerializer serializer;
 
     public OffheapCache(HugeGraph graph, long capacity, long avgEntryBytes) {
@@ -72,6 +74,23 @@ public class OffheapCache extends AbstractCache<Id, Object> {
 
     private HugeGraph graph() {
         return this.graph;
+    }
+
+    /**
+     * Rebind this cache to a (re)opened graph instance and drop stale entries.
+     * CacheManager keeps a single cache per graph name, so after a graph is
+     * dropped and recreated with the same name the cached off-heap entries
+     * still reference the old, closed instance; deserializing them would call
+     * back into that closed graph via readVertex(graph()) and fail with
+     * "Graph ... has been closed". Rebinding to the live instance prevents it.
+     */
+    synchronized boolean rebind(HugeGraph graph) {
+        if (graph == null || this.graph == graph) {
+            return false;
+        }
+        this.graph = graph;
+        this.clear();
+        return true;
     }
 
     private AbstractSerializer serializer() {

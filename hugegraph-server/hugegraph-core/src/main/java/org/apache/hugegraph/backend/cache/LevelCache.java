@@ -20,6 +20,7 @@ package org.apache.hugegraph.backend.cache;
 import java.util.Iterator;
 import java.util.function.Consumer;
 
+import org.apache.hugegraph.HugeGraph;
 import org.apache.hugegraph.backend.id.Id;
 import org.apache.hugegraph.iterator.ExtendableIterator;
 import org.apache.hugegraph.util.E;
@@ -52,6 +53,31 @@ public final class LevelCache extends AbstractCache<Id, Object> {
         for (AbstractCache<Id, Object> cache : this.caches) {
             cache.clear();
         }
+    }
+
+    /**
+     * Rebind the off-heap level to a (re)opened graph instance and clear all
+     * levels, so a same-name graph recreated after drop does not reuse entries
+     * (serialized bytes in L2, or deserialized elements bound to the closed
+     * instance in L1) left over from the previous instance.
+     * See OffheapCache#rebind.
+     */
+    boolean rebind(HugeGraph graph) {
+        if (graph == null) {
+            return false;
+        }
+        boolean changed = false;
+        for (AbstractCache<Id, Object> cache : this.caches) {
+            if (cache instanceof OffheapCache &&
+                ((OffheapCache) cache).rebind(graph)) {
+                changed = true;
+            }
+        }
+        if (changed) {
+            // Also drop stale L1 (in-heap) entries bound to the old instance
+            this.clear();
+        }
+        return changed;
     }
 
     @Override

@@ -130,6 +130,10 @@ public class CacheManager {
         Cache<Id, V> cache = (Cache<Id, V>) this.caches.get(name);
         E.checkArgument(cache instanceof OffheapCache,
                         "Invalid cache implement: %s", cache.getClass());
+        // A same-name graph recreated after drop reuses this named cache;
+        // rebind it to the live instance so deserialization won't call back
+        // into the previous, closed instance ("Graph ... has been closed").
+        ((OffheapCache) cache).rebind(graph);
         return cache;
     }
 
@@ -148,6 +152,10 @@ public class CacheManager {
         Cache<Id, V> cache = (Cache<Id, V>) this.caches.get(name);
         E.checkArgument(cache instanceof LevelCache,
                         "Invalid cache implement: %s", cache.getClass());
+        // A same-name graph recreated after drop reuses this named cache;
+        // rebind it to the live instance so deserialization won't call back
+        // into the previous, closed instance ("Graph ... has been closed").
+        ((LevelCache) cache).rebind(graph);
         return cache;
     }
 
